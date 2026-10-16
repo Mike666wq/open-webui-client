@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State, Url, Webview, ipc::CapabilityBuilder};
+use tauri::{AppHandle, Manager, Runtime, State, Url, Webview, ipc::CapabilityBuilder};
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
@@ -449,7 +449,7 @@ pub(crate) fn require_current_session(
     Ok(current)
 }
 
-pub fn on_page_load(webview: &Webview, url: &Url) {
+pub fn on_page_load<R: Runtime>(webview: &Webview<R>, url: &Url) {
     let Ok(current) = webview.url() else { return };
     let Some(manager) = webview.try_state::<ConnectionManager>() else {
         return;
@@ -497,7 +497,7 @@ pub fn on_page_load(webview: &Webview, url: &Url) {
     let _ = webview.eval(&script);
 }
 
-pub fn on_local_navigation(webview: &Webview, url: &Url) {
+pub fn on_local_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) {
     if is_local_entry(url) {
         if let Some(manager) = webview.try_state::<ConnectionManager>() {
             manager.invalidate_for_settings(false);
@@ -540,7 +540,7 @@ pub fn is_dev_entry(url: &Url) -> bool {
         && url.password().is_none()
 }
 
-pub fn is_current_service_origin(webview: &Webview, target: &Url) -> bool {
+pub fn is_current_service_origin<R: Runtime>(webview: &Webview<R>, target: &Url) -> bool {
     let Ok(current) = webview.url() else {
         return false;
     };
@@ -555,7 +555,7 @@ pub fn is_current_service_origin(webview: &Webview, target: &Url) -> bool {
     })
 }
 
-pub fn has_active_service_session(webview: &Webview) -> bool {
+pub fn has_active_service_session<R: Runtime>(webview: &Webview<R>) -> bool {
     let Ok(current) = webview.url() else {
         return false;
     };
@@ -779,4 +779,3 @@ mod tests {
         assert_eq!(state.consume_startup_url(), None);
     }
 }
-

@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 mod connection;
 mod navigation;
 
@@ -31,8 +33,7 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+L"),
             )?;
-            let app_menu =
-                Submenu::with_items(handle, "Open WebUI Client", true, &[&settings])?;
+            let app_menu = Submenu::with_items(handle, "Open WebUI Client", true, &[&settings])?;
             Menu::with_items(handle, &[&app_menu])
         })
         .on_menu_event(|app, event| {

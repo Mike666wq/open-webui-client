@@ -1,5 +1,5 @@
 use tauri::{
-    Runtime, Url, Webview,
+    Manager, Runtime, Url, Webview,
     plugin::{Builder, TauriPlugin},
     webview::PageLoadEvent,
 };
