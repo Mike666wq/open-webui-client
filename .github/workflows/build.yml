@@ -46,17 +46,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
       - name: Verify or create Cargo.lock
         id: lock
         shell: bash
         run: |
-          if [ -f package-lock.json ] && [ -f src-tauri/Cargo.lock ]; then
-            echo "Both package-lock.json and src-tauri/Cargo.lock exist; this build will use the checked-in lockfiles."
-            echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if [ -f package-lock.json ] && [ -f src-tauri/Cargo.lock ]; then
+              echo "Both lockfiles exist; this PR will use the checked-in lockfiles."
+              echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "A required lockfile is missing. Push the branch to run lockfile bootstrap, then include package-lock.json and src-tauri/Cargo.lock in the pull request." >&2
             exit 1
           fi
@@ -65,16 +65,15 @@ jobs:
             exit 1
           fi
 
-          missing_lock=false
           if [ ! -f package-lock.json ]; then
             npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-            missing_lock=true
           fi
           if [ ! -f src-tauri/Cargo.lock ]; then
             cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
-            missing_lock=true
+          else
+            cargo update --workspace --manifest-path src-tauri/Cargo.toml
           fi
-          if [ "$missing_lock" = false ]; then
+          if git diff --quiet -- package-lock.json src-tauri/Cargo.lock; then
             echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -154,6 +153,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
           targets: ${{ matrix.target }}
       - run: npm ci
       - name: Run Node tests
@@ -199,6 +199,8 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install Android SDK components
         run: |
           sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0" "ndk;28.2.13676358"
@@ -206,6 +208,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
           targets: aarch64-linux-android
       - name: Install frontend dependencies
         run: npm ci
@@ -243,6 +246,8 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install Android SDK components
         run: |
           sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0" "ndk;28.2.13676358"
@@ -250,6 +255,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
           targets: aarch64-linux-android
       - name: Install frontend dependencies
         run: npm ci
