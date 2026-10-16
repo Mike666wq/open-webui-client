@@ -33,8 +33,7 @@ pub fn init<R: Runtime>(settings_url: impl Into<String>) -> TauriPlugin<R> {
                     ANDROID_PLUGIN_IDENTIFIER,
                     "ConnectionControlsPlugin",
                 )?;
-                handle
-                    .run_mobile_plugin::<()>("configure", ConfigureArgs { settings_url })?;
+                handle.run_mobile_plugin::<()>("configure", ConfigureArgs { settings_url })?;
             }
             #[cfg(not(target_os = "android"))]
             let _ = api;
