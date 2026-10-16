@@ -1,0 +1,85 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(here, '..');
+const androidRoot = path.join(projectRoot, 'src-tauri', 'gen', 'android');
+
+const networkConfig = `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">mint</domain>
+    </domain-config>
+</network-security-config>
+`;
+
+export function updateManifest(source) {
+  if (!source.includes('<manifest') || !source.includes('<application')) {
+    throw new Error('AndroidManifest.xml is missing a manifest or application element');
+  }
+  if (/android:usesCleartextTraffic\s*=\s*["']true["']/i.test(source)) {
+    throw new Error('Refusing a global usesCleartextTraffic setting; cleartext must be scoped to mint');
+  }
+
+  let result = source;
+  if (!/android:networkSecurityConfig\s*=/.test(result)) {
+    result = result.replace(/<application\b/, '<application android:networkSecurityConfig="@xml/network_security_config"');
+  }
+  if (!result.includes('android:networkSecurityConfig="@xml/network_security_config"')) {
+    throw new Error('AndroidManifest.xml already uses an unexpected network security configuration');
+  }
+  return result;
+}
+
+export function updateGradle(source) {
+  if (!source.includes('android {')) throw new Error('app/build.gradle.kts has no android block');
+  const requiredEnv = `            storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: throw GradleException("ANDROID_KEYSTORE_PATH is required"))
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: throw GradleException("ANDROID_KEYSTORE_PASSWORD is required")
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: throw GradleException("ANDROID_KEY_ALIAS is required")
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: throw GradleException("ANDROID_KEY_PASSWORD is required")`;
+
+  let result = source;
+  result = result.replace(/manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"/g, 'manifestPlaceholders["usesCleartextTraffic"] = "false"');
+  const signingBlock = `    if (System.getenv("ANDROID_KEYSTORE_PATH") != null) {
+        signingConfigs {
+        create("release") {
+${requiredEnv}
+        }
+        }
+    }
+
+`;
+
+  if (!result.includes('create("release")')) {
+    result = result.replace(/(\n\s*buildTypes\s*\{)/, `\n${signingBlock}$1`);
+  }
+  if (!result.includes('create("release")')) {
+    throw new Error('Could not add release signing configuration before buildTypes');
+  }
+
+  if (!/signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/.test(result)) {
+    const releaseBlock = /(buildTypes\s*\{[\s\S]*?getByName\("release"\)\s*\{)/;
+    if (!releaseBlock.test(result)) throw new Error('Could not find the generated release build type in app/build.gradle.kts');
+    result = result.replace(releaseBlock, '$1\n            if (System.getenv("ANDROID_KEYSTORE_PATH") != null) {\n                signingConfig = signingConfigs.getByName("release")\n            }');
+  }
+  return result;
+}
+
+export async function prepareAndroidProject(root = projectRoot) {
+  const mainDir = path.join(root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main');
+  const manifestPath = path.join(mainDir, 'AndroidManifest.xml');
+  const gradlePath = path.join(root, 'src-tauri', 'gen', 'android', 'app', 'build.gradle.kts');
+  const manifest = updateManifest(await readFile(manifestPath, 'utf8'));
+  const gradle = updateGradle(await readFile(gradlePath, 'utf8'));
+  await writeFile(manifestPath, manifest);
+  await writeFile(gradlePath, gradle);
+  const resourceDir = path.join(mainDir, 'res', 'xml');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(resourceDir, { recursive: true });
+  await writeFile(path.join(resourceDir, 'network_security_config.xml'), networkConfig);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await prepareAndroidProject();
+}

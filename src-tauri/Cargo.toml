@@ -1,0 +1,23 @@
+[package]
+name = "open-webui-client"
+version = "0.1.0"
+description = "Open WebUI Client"
+authors = ["Open WebUI Client"]
+edition = "2024"
+rust-version = "1.94"
+
+[workspace]
+resolver = "3"
+
+[lib]
+name = "open_webui_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-tls-webpki-roots"] }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "=2.12.3", features = [] }
+tauri-plugin-opener = "=2.7.0"

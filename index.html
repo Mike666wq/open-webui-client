@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111827" />
+    <title>Open WebUI Client</title>
+  </head>
+  <body>
+    <main class="panel" aria-live="polite">
+      <div class="mark" aria-hidden="true">W</div>
+      <p class="eyebrow">OPEN WEBUI CLIENT</p>
+      <h1 id="heading">Connecting to your server</h1>
+      <p id="detail" class="detail">Checking the configured service address…</p>
+      <div id="service-address" class="address"></div>
+      <button id="retry" type="button" hidden>Try again</button>
+      <p id="error" class="error" role="alert" hidden></p>
+    </main>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
