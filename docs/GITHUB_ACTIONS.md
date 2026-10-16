@@ -9,7 +9,7 @@ GitHub Actions 的手动 `Run workflow` 入口要求 workflow 文件已存在于
 - Node.js `22.22.0`，使用 `npm ci` 严格按 `package-lock.json` 安装。
 - Rust `1.94.0`，Cargo 使用仓库提交的 `src-tauri/Cargo.lock`。
 - Windows：`windows-2025`，生成 x64 NSIS 安装程序。
-- macOS arm64：`macos-15`；Intel x64：`macos-15-intel`。两者分别生成 ad-hoc DMG。
+- macOS Apple Silicon arm64：`macos-15`，生成一份 ad-hoc DMG。
 - Android：`ubuntu-22.04`、Temurin JDK 25、Android SDK Platform 36、Build Tools 36.0.0、NDK 28.2.13676358，以及 Rust target `aarch64-linux-android`。Tauri CLI 2.12.2 模板默认 compile/target SDK 为 37、Gradle 9.6.1、AGP 9.3.1 和 Kotlin 2.2.10；目前 GitHub runner 的 SDK 仓库未提供 Platform 37，因此 `prepare-android.mjs` 将生成的 compileSdk/targetSdk 定向设为 36，minSdk 仍为 29。
 
 如需升级工具版本，应选择已发布版本并在此记录。工作流将 Node、Rust、Android SDK、Build Tools 和 NDK 版本固定，避免构建环境随 runner 默认值静默变化。
@@ -50,4 +50,4 @@ Actions 成功只证明 CI runner 完成了构建。下载后仍需执行[真实
 - [Tauri 2.12 发布说明](https://v2.tauri.app/blog/tauri-2.12/)：Android 模板 targetSdk 更新到 37。
 - [Tauri CLI 2.12.2 Android Gradle 模板](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.2/crates/tauri-cli/templates/mobile/android/app/build.gradle.kts)：compileSdk/targetSdk 37；对应模板使用 Gradle 9.6.1、AGP 9.3.1 和 Kotlin 2.2.10。
 - [Tauri macOS 签名说明](https://v2.tauri.app/distribute/sign/macos/)：ad-hoc 签名身份配置为 `-`。
-- [GitHub-hosted runner images](https://github.com/actions/runner-images)：`macos-15` ARM64 与 `macos-15-intel` x64 runner 标签。
+- [GitHub-hosted runner images](https://github.com/actions/runner-images)：`macos-15` ARM64 runner 标签。

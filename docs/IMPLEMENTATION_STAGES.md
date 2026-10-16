@@ -7,7 +7,7 @@
 阶段一目标产物：
 
 - Windows 10/11 x64 NSIS 安装程序，携带离线 WebView2 Runtime。
-- macOS 12+ Intel 与 Apple Silicon 两份 ad-hoc DMG。
+- macOS 12+ Apple Silicon 一份 ad-hoc DMG。
 - Android 10+ ARM64 release APK，必须由固定 keystore 签名。
 
 push 与 Pull Request 会运行 Android debug 编译检查，但不会上传 debug APK；签名 release APK 只在手动选择 `android` 或 `all` 且已配置完整签名 secrets 时构建。debug 编译检查不代表已生成或验收可分发的安装包。

@@ -5,7 +5,7 @@ Open WebUI Client 是一个以 Tauri 2 打包的轻量客户端，初版通过�
 ## 首版支持
 
 - Windows 10/11 x64：NSIS `setup.exe`，安装包包含离线 WebView2 Runtime。
-- macOS 12 及以上：Intel 与 Apple Silicon 分别生成 ad-hoc 签名 DMG。
+- macOS 12 及以上 Apple Silicon：生成 ad-hoc 签名 DMG。
 - Android 10 及以上 ARM64：使用仓库固定 keystore 签名的 release APK。
 
 Windows 和 macOS 构建不依赖 Android 签名 secrets。CI 只在 Actions 中构建并保存 artifacts，不创建 GitHub Release，也不代表安装包已在真实设备上验收。详见[阶段说明](docs/IMPLEMENTATION_STAGES.md)、[验收清单](docs/ACCEPTANCE.md)和[Actions 配置](docs/GITHUB_ACTIONS.md)。
