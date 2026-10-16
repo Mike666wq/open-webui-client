@@ -12,7 +12,6 @@
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "useHttpsScheme": false,
       "capabilities": ["local-shell"]
     },
     "windows": [
@@ -24,6 +23,7 @@
         "minWidth": 360,
         "minHeight": 500,
         "resizable": true,
+        "useHttpsScheme": false,
         "url": "index.html"
       }
     ]

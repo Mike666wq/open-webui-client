@@ -8,10 +8,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{
-    AppHandle, Manager, State, Url, Webview,
-    ipc::CapabilityBuilder,
-};
+use tauri::{AppHandle, Manager, State, Url, Webview, ipc::CapabilityBuilder};
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
@@ -74,7 +71,10 @@ impl ConnectionManager {
     where
         F: FnOnce(&Url) -> Result<(), String>,
     {
-        let mut state = self.0.lock().map_err(|_| "Connection state is unavailable.")?;
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| "Connection state is unavailable.")?;
         let candidate = state.validate_ready(generation, nonce, current_origin)?;
         if let Err(error) = persist(&candidate) {
             state.error = Some(error.clone());
@@ -190,7 +190,8 @@ impl ConnectionRuntime {
         nonce: &str,
         current_origin: &str,
     ) -> Result<Url, String> {
-        if self.ready || generation != self.generation || self.ready_nonce.as_deref() != Some(nonce) {
+        if self.ready || generation != self.generation || self.ready_nonce.as_deref() != Some(nonce)
+        {
             return Err("This connection attempt is no longer active.".into());
         }
         let candidate = self
@@ -245,7 +246,8 @@ impl ConnectionRuntime {
 }
 
 pub fn validate_service_url(value: &str) -> Result<Url, String> {
-    let url = Url::parse(value.trim()).map_err(|_| "Enter a valid HTTP or HTTPS address.".to_string())?;
+    let url =
+        Url::parse(value.trim()).map_err(|_| "Enter a valid HTTP or HTTPS address.".to_string())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none_or(str::is_empty)
         || url.host_str() == Some("tauri.localhost")
@@ -255,7 +257,9 @@ pub fn validate_service_url(value: &str) -> Result<Url, String> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err("Use an HTTP or HTTPS address without a path, query, credentials, or fragment.".into());
+        return Err(
+            "Use an HTTP or HTTPS address without a path, query, credentials, or fragment.".into(),
+        );
     }
     Ok(url)
 }
@@ -290,7 +294,9 @@ fn persist_last_success(app: &AppHandle, url: &Url) -> Result<(), String> {
     .map_err(|error| format!("Could not save connection: {error}"))?;
     let write_result = (|| {
         let mut output = File::create(&temp).map_err(|error| error.to_string())?;
-        output.write_all(&contents).map_err(|error| error.to_string())?;
+        output
+            .write_all(&contents)
+            .map_err(|error| error.to_string())?;
         output.sync_all().map_err(|error| error.to_string())?;
         replace_file(&temp, &file).map_err(|error| error.to_string())
     })();
@@ -328,7 +334,10 @@ fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result
 }
 
 #[tauri::command(rename = "get-connection-state")]
-pub fn get_connection_state(webview: Webview, manager: State<'_, ConnectionManager>) -> Result<ConnectionStatus, String> {
+pub fn get_connection_state(
+    webview: Webview,
+    manager: State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
     ensure_local_webview(&webview)?;
     let local_origin = is_local_entry(&webview.url().map_err(|error| error.to_string())?);
     if local_origin {
@@ -442,22 +451,30 @@ pub(crate) fn require_current_session(
 
 pub fn on_page_load(webview: &Webview, url: &Url) {
     let Ok(current) = webview.url() else { return };
-    let Some(manager) = webview.try_state::<ConnectionManager>() else { return };
+    let Some(manager) = webview.try_state::<ConnectionManager>() else {
+        return;
+    };
     enum LoadAction {
         Handshake(u64, String, String),
         RestoreSession(u64, String, String),
     }
     let action = {
         let state = manager.0.lock().expect("connection state poisoned");
-        let Some(candidate) = state.candidate.as_ref() else { return };
+        let Some(candidate) = state.candidate.as_ref() else {
+            return;
+        };
         if candidate.origin() != current.origin() || url.origin() != current.origin() {
             return;
         }
         if state.ready {
-            let Some(token) = state.session_token.clone() else { return };
+            let Some(token) = state.session_token.clone() else {
+                return;
+            };
             LoadAction::RestoreSession(state.generation, token, origin_string(candidate))
         } else {
-            let Some(nonce) = state.ready_nonce.clone() else { return };
+            let Some(nonce) = state.ready_nonce.clone() else {
+                return;
+            };
             LoadAction::Handshake(state.generation, nonce, origin_string(candidate))
         }
     };
@@ -524,8 +541,12 @@ pub fn is_dev_entry(url: &Url) -> bool {
 }
 
 pub fn is_current_service_origin(webview: &Webview, target: &Url) -> bool {
-    let Ok(current) = webview.url() else { return false };
-    let Some(manager) = webview.try_state::<ConnectionManager>() else { return false };
+    let Ok(current) = webview.url() else {
+        return false;
+    };
+    let Some(manager) = webview.try_state::<ConnectionManager>() else {
+        return false;
+    };
     let state = manager.0.lock().expect("connection state poisoned");
     state.candidate.as_ref().is_some_and(|candidate| {
         (state.ready || state.ready_nonce.is_some())
@@ -535,8 +556,12 @@ pub fn is_current_service_origin(webview: &Webview, target: &Url) -> bool {
 }
 
 pub fn has_active_service_session(webview: &Webview) -> bool {
-    let Ok(current) = webview.url() else { return false };
-    let Some(manager) = webview.try_state::<ConnectionManager>() else { return false };
+    let Ok(current) = webview.url() else {
+        return false;
+    };
+    let Some(manager) = webview.try_state::<ConnectionManager>() else {
+        return false;
+    };
     let state = manager.0.lock().expect("connection state poisoned");
     state.ready
         && state
@@ -572,8 +597,14 @@ mod tests {
 
     #[test]
     fn accepts_http_https_hosts_and_ports_but_only_root_origins() {
-        assert_eq!(origin_string(&url("http://192.168.31.60:3000")), "http://192.168.31.60:3000");
-        assert_eq!(origin_string(&url("https://chat.example.org:8443/")), "https://chat.example.org:8443");
+        assert_eq!(
+            origin_string(&url("http://192.168.31.60:3000")),
+            "http://192.168.31.60:3000"
+        );
+        assert_eq!(
+            origin_string(&url("https://chat.example.org:8443/")),
+            "https://chat.example.org:8443"
+        );
         for invalid in [
             "file:///tmp",
             "javascript:alert(1)",
@@ -587,7 +618,10 @@ mod tests {
         ] {
             assert!(validate_service_url(invalid).is_err(), "accepted {invalid}");
         }
-        assert_eq!(origin_string(&url("http://localhost:3000")), "http://localhost:3000");
+        assert_eq!(
+            origin_string(&url("http://localhost:3000")),
+            "http://localhost:3000"
+        );
     }
 
     #[test]
@@ -596,41 +630,105 @@ mod tests {
         let first = manager.begin(url("http://example.org:3000"));
         let second = manager.begin(url("https://chat.example.org"));
         let mut writes = 0;
-        assert!(manager.complete_ready(first.generation, &first.nonce, "http://example.org:3000", |_| {
-            writes += 1;
-            Ok(())
-        }).is_err());
-        assert!(!manager.should_return_after_ready_error(first.generation, "http://example.org:3000"));
-        assert!(manager.complete_ready(second.generation, &first.nonce, "https://chat.example.org", |_| {
-            writes += 1;
-            Ok(())
-        }).is_err());
+        assert!(
+            manager
+                .complete_ready(
+                    first.generation,
+                    &first.nonce,
+                    "http://example.org:3000",
+                    |_| {
+                        writes += 1;
+                        Ok(())
+                    }
+                )
+                .is_err()
+        );
+        assert!(
+            !manager.should_return_after_ready_error(first.generation, "http://example.org:3000")
+        );
+        assert!(
+            manager
+                .complete_ready(
+                    second.generation,
+                    &first.nonce,
+                    "https://chat.example.org",
+                    |_| {
+                        writes += 1;
+                        Ok(())
+                    }
+                )
+                .is_err()
+        );
         assert_eq!(writes, 0);
-        assert!(manager.complete_ready(second.generation, &second.nonce, "https://chat.example.org", |saved| {
-            assert_eq!(origin_string(saved), "https://chat.example.org");
-            writes += 1;
-            Ok(())
-        }).is_ok());
+        assert!(
+            manager
+                .complete_ready(
+                    second.generation,
+                    &second.nonce,
+                    "https://chat.example.org",
+                    |saved| {
+                        assert_eq!(origin_string(saved), "https://chat.example.org");
+                        writes += 1;
+                        Ok(())
+                    }
+                )
+                .is_ok()
+        );
         assert_eq!(writes, 1);
-        assert!(manager.complete_ready(second.generation, &second.nonce, "https://chat.example.org", |_| Ok(())).is_err());
-        assert!(!manager.is_current_session(second.generation, "https://chat.example.org", &first.session_token));
-        assert!(manager.is_current_session(second.generation, "https://chat.example.org", &second.session_token));
+        assert!(
+            manager
+                .complete_ready(
+                    second.generation,
+                    &second.nonce,
+                    "https://chat.example.org",
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert!(!manager.is_current_session(
+            second.generation,
+            "https://chat.example.org",
+            &first.session_token
+        ));
+        assert!(manager.is_current_session(
+            second.generation,
+            "https://chat.example.org",
+            &second.session_token
+        ));
     }
 
     #[test]
     fn failed_persistence_does_not_replace_last_success_or_mark_ready() {
         let original = url("https://saved.example.org");
-        let manager = ConnectionManager(Arc::new(Mutex::new(ConnectionRuntime::new(Some(original.clone())))));
+        let manager = ConnectionManager(Arc::new(Mutex::new(ConnectionRuntime::new(Some(
+            original.clone(),
+        ))));
         let attempt = manager.begin(url("http://new.example.org:8080"));
-        let persistence = manager.complete_ready(attempt.generation, &attempt.nonce, "http://new.example.org:8080", |_| Err("disk full".into()));
+        let persistence = manager.complete_ready(
+            attempt.generation,
+            &attempt.nonce,
+            "http://new.example.org:8080",
+            |_| Err("disk full".into()),
+        );
         assert!(persistence.is_err());
-        assert!(manager.should_return_after_ready_error(attempt.generation, "http://new.example.org:8080"));
+        assert!(
+            manager
+                .should_return_after_ready_error(attempt.generation, "http://new.example.org:8080")
+        );
         let state = manager.0.lock().unwrap();
         assert_eq!(state.last_success, Some(original));
         assert!(!state.ready);
         assert!(state.ready_nonce.is_none());
         assert!(state.session_token.is_none());
-        assert!(state.validate_ready(attempt.generation, &attempt.nonce, "http://new.example.org:8080").is_err());
+        assert!(
+            state
+                .validate_ready(
+                    attempt.generation,
+                    &attempt.nonce,
+                    "http://new.example.org:8080"
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -641,15 +739,31 @@ mod tests {
         state.return_to_settings(true);
         assert!(!state.startup_pending);
         assert!(state.ready_nonce.is_none());
-        assert!(state.validate_ready(attempt.generation, &attempt.nonce, "http://192.168.31.60:3000").is_err());
-        assert!(!state.authorizes(attempt.generation, "http://192.168.31.60:3000", &attempt.session_token));
+        assert!(
+            state
+                .validate_ready(
+                    attempt.generation,
+                    &attempt.nonce,
+                    "http://192.168.31.60:3000"
+                )
+                .is_err()
+        );
+        assert!(!state.authorizes(
+            attempt.generation,
+            "http://192.168.31.60:3000",
+            &attempt.session_token
+        ));
         assert!(!state.timeout(attempt.generation));
 
         let next = state.begin(url("https://next.example.org"));
         assert!(state.timeout(next.generation));
         assert!(state.error.is_some());
         assert!(state.ready_nonce.is_none());
-        assert!(!state.authorizes(next.generation, "https://next.example.org", &next.session_token));
+        assert!(!state.authorizes(
+            next.generation,
+            "https://next.example.org",
+            &next.session_token
+        ));
     }
 
     #[test]

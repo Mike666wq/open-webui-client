@@ -9,7 +9,9 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_connection_controls::init("http://tauri.localhost/"))
+        .plugin(tauri_plugin_connection_controls::init(
+            "http://tauri.localhost/",
+        ))
         .plugin(navigation::plugin())
         .invoke_handler(tauri::generate_handler![
             connection::get_connection_state,
@@ -29,7 +31,8 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+L"),
             )?;
-            let app_menu = Submenu::with_items(handle, "Open WebUI Client", true, &[&settings])?;
+            let app_menu =
+                Submenu::with_items(handle, "Open WebUI Client", true, &[&settings])?;
             Menu::with_items(handle, &[&app_menu])
         })
         .on_menu_event(|app, event| {
