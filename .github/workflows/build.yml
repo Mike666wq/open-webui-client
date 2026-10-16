@@ -102,6 +102,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
       - name: Run Node tests
@@ -156,6 +160,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
       - run: npm ci
       - name: Run Node tests
         run: npm test
@@ -211,6 +219,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
           targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
       - name: Run Node tests
@@ -258,6 +270,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
           targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
       - name: Run Node tests

@@ -3,7 +3,7 @@
     try {
       const url = new URL(value, window.location.href);
       if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) return;
-      window.__TAURI__?.core?.invoke('open_external', { url: url.href }).catch(() => {});
+      window.__TAURI__?.core?.invoke('open-external', { url: url.href }).catch(() => {});
     } catch {}
   };
 

@@ -8,6 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export async function generateClientConfig() {
   const config = JSON.parse(await readFile(path.join(root, 'client.config.json'), 'utf8'));
   const service = validateServiceUrl(config.serviceUrl);
+  const permissionFor = (command) => `allow-${command.replaceAll('_', '-')}`;
   if (!Number.isInteger(config.preflightTimeoutMs) || config.preflightTimeoutMs < 1 || config.preflightTimeoutMs > 5000) {
     throw new TypeError('preflightTimeoutMs must be an integer from 1 through 5000');
   }
@@ -22,7 +23,7 @@ export async function generateClientConfig() {
       windows: ['main'],
       local: false,
       remote: { urls: [`${service.origin}/*`] },
-      permissions: ['allow-open_external'],
+      permissions: [permissionFor('open_external')],
     }, null, 2)}\n`,
   );
 

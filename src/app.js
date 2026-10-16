@@ -35,7 +35,7 @@ async function connect() {
   state = transition(state, { type: 'retry' });
   render(state);
   try {
-    await invoke('check_service');
+    await invoke('check-service');
     render(transition(state, { type: 'available' }));
   } catch (cause) {
     render(transition(state, { type: 'unavailable' }), String(cause));

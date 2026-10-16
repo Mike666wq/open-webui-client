@@ -8,7 +8,7 @@ pub struct ServiceConfig {
     pub timeout_ms: u64,
 }
 
-#[tauri::command]
+#[tauri::command(rename = "check-service")]
 pub async fn check_service(
     app: AppHandle,
     service: State<'_, ServiceConfig>,
@@ -49,7 +49,7 @@ pub async fn check_service(
         .map_err(|error| format!("Could not open the service: {error}"))
 }
 
-#[tauri::command]
+#[tauri::command(rename = "open-external")]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = parse_external_url(&url)?;
     app.opener()

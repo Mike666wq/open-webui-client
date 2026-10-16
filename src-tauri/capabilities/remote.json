@@ -11,6 +11,6 @@
     ]
   },
   "permissions": [
-    "allow-open_external"
+    "allow-open-external"
   ]
 }

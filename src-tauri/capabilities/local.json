@@ -4,5 +4,5 @@
   "description": "Allows the bundled startup page to check the configured service and open validated external links.",
   "windows": ["main"],
   "local": true,
-  "permissions": ["allow-check_service", "allow-open_external"]
+  "permissions": ["allow-check-service", "allow-open-external"]
 }
