@@ -10,13 +10,13 @@ GitHub Actions 的手动 `Run workflow` 入口要求 workflow 文件已存在于
 - Rust `1.94.0`，Cargo 使用仓库提交的 `src-tauri/Cargo.lock`。
 - Windows：`windows-2025`，生成 x64 NSIS 安装程序。
 - macOS arm64：`macos-15`；Intel x64：`macos-15-intel`。两者分别生成 ad-hoc DMG。
-- Android：`ubuntu-22.04`、Temurin JDK 25、Android SDK Platform 37、Build Tools 37.0.0、NDK 28.2.13676358，以及 Rust target `aarch64-linux-android`。Tauri CLI 2.12.2 初始化模板使用 compile/target SDK 37、Gradle 9.6.1、AGP 9.3.1 和 Kotlin 2.2.10；项目 minSdk 为 29。
+- Android：`ubuntu-22.04`、Temurin JDK 25、Android SDK Platform 36、Build Tools 36.0.0、NDK 28.2.13676358，以及 Rust target `aarch64-linux-android`。Tauri CLI 2.12.2 模板默认 compile/target SDK 为 37、Gradle 9.6.1、AGP 9.3.1 和 Kotlin 2.2.10；目前 GitHub runner 的 SDK 仓库未提供 Platform 37，因此 `prepare-android.mjs` 将生成的 compileSdk/targetSdk 定向设为 36，minSdk 仍为 29。
 
 如需升级工具版本，应选择已发布版本并在此记录。工作流将 Node、Rust、Android SDK、Build Tools 和 NDK 版本固定，避免构建环境随 runner 默认值静默变化。
 
 ## Cargo.lock 引导
 
-`prepare-lockfile` job 负责选定构建源码 SHA。若 `package-lock.json` 和 `src-tauri/Cargo.lock` 已存在，它不更改文件并输出当前 SHA。若 push 或手动运行的分支缺少其中任一文件，它只生成缺少的锁文件（npm 使用 `--package-lock-only --ignore-scripts --no-audit --no-fund`），只提交 `package-lock.json` 与 `src-tauri/Cargo.lock`，将提交 SHA 传给后续构建 jobs。`git push` 是非强制推送；若远端分支已变化则引导失败，避免覆盖新提交。Pull Request 缺锁时失败并给出提示，绝不向 PR 或 fork 写入。
+`prepare-lockfile` job 负责选定构建源码 SHA。Pull Request 只验证锁文件存在并使用当前 SHA，缺锁时失败并提示先推送分支完成引导；它不会写入 PR 或 fork。push 或手动分支运行时，缺少 `package-lock.json` 才用 `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` 生成；缺少 `Cargo.lock` 时生成，否则运行 `cargo update --workspace` 以让 Cargo.toml 的 workspace 依赖变更反映到锁文件。只有锁文件 diff 时才提交 `package-lock.json` 与 `src-tauri/Cargo.lock`，并将提交 SHA 传给后续构建 jobs。`git push` 是非强制推送；若远端分支已变化则引导失败，避免覆盖新提交。
 
 只有该引导 job 获得 `contents: write`；桌面与 Android 构建 job 只有读取权限。构建 jobs checkout 锁文件所在的确切 SHA，先 `cargo fetch --locked`，再设为 Cargo 离线模式构建；构建后检查锁文件没有变化。不在 Windows 本地安装编译工具。
 

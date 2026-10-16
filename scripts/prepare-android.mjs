@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..');
 const androidRoot = path.join(projectRoot, 'src-tauri', 'gen', 'android');
+const ANDROID_SDK_LEVEL = 36;
 
 const networkConfig = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
@@ -40,6 +41,16 @@ export function updateGradle(source) {
             keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: throw GradleException("ANDROID_KEY_PASSWORD is required")`;
 
   let result = source;
+  const compileSdk37 = result.match(/compileSdk\s*=\s*37\b/g) ?? [];
+  const targetSdk37 = result.match(/targetSdk\s*=\s*37\b/g) ?? [];
+  const compileSdk36 = result.match(/compileSdk\s*=\s*36\b/g) ?? [];
+  const targetSdk36 = result.match(/targetSdk\s*=\s*36\b/g) ?? [];
+  if (compileSdk37.length === 1 && targetSdk37.length === 1 && compileSdk36.length === 0 && targetSdk36.length === 0) {
+    result = result.replace(/compileSdk\s*=\s*37\b/, `compileSdk = ${ANDROID_SDK_LEVEL}`);
+    result = result.replace(/targetSdk\s*=\s*37\b/, `targetSdk = ${ANDROID_SDK_LEVEL}`);
+  } else if (compileSdk36.length !== 1 || targetSdk36.length !== 1 || compileSdk37.length !== 0 || targetSdk37.length !== 0) {
+    throw new Error('Expected the Tauri CLI 2.12.2 Android template to declare compileSdk and targetSdk 37 exactly once');
+  }
   result = result.replace(/manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"/g, 'manifestPlaceholders["usesCleartextTraffic"] = "false"');
   const signingBlock = `    if (System.getenv("ANDROID_KEYSTORE_PATH") != null) {
         signingConfigs {

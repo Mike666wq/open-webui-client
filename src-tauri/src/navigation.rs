@@ -1,4 +1,7 @@
-use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime, Url, Webview};
+use tauri::{
+    Manager, Runtime, Url, Webview,
+    plugin::{Builder, TauriPlugin},
+};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{service::parse_external_url, service_url::SERVICE_URL};
@@ -31,13 +34,11 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
 fn is_local_entry(url: &Url) -> bool {
     let no_credentials = url.username().is_empty() && url.password().is_none();
     #[cfg(any(target_os = "windows", target_os = "android"))]
-    let matches_entry = url.scheme() == "http"
-        && url.host_str() == Some("tauri.localhost")
-        && url.port().is_none();
+    let matches_entry =
+        url.scheme() == "http" && url.host_str() == Some("tauri.localhost") && url.port().is_none();
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let matches_entry = url.scheme() == "tauri"
-        && url.host_str() == Some("localhost")
-        && url.port().is_none();
+    let matches_entry =
+        url.scheme() == "tauri" && url.host_str() == Some("localhost") && url.port().is_none();
 
     no_credentials && matches_entry
 }

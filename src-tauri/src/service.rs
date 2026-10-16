@@ -9,7 +9,10 @@ pub struct ServiceConfig {
 }
 
 #[tauri::command]
-pub async fn check_service(app: AppHandle, service: State<'_, ServiceConfig>) -> Result<(), String> {
+pub async fn check_service(
+    app: AppHandle,
+    service: State<'_, ServiceConfig>,
+) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(service.timeout_ms))
         .redirect(reqwest::redirect::Policy::none())

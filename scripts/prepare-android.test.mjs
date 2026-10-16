@@ -14,7 +14,12 @@ test('manifest scopes cleartext permission to mint and preserves existing attrib
 
 test('Gradle release signing reads secrets from environment and stays idempotent', () => {
   const input = `android {
-    defaultConfig { manifestPlaceholders["usesCleartextTraffic"] = "false" }
+    compileSdk = 37
+    defaultConfig {
+        minSdk = 29
+        targetSdk = 37
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
+    }
     buildTypes {
         getByName("debug") { manifestPlaceholders["usesCleartextTraffic"] = "true" }
         getByName("release") {
@@ -24,6 +29,9 @@ test('Gradle release signing reads secrets from environment and stays idempotent
 }`;
   const once = updateGradle(input);
   assert.match(once, /create\("release"\)/);
+  assert.match(once, /compileSdk = 36/);
+  assert.match(once, /targetSdk = 36/);
+  assert.match(once, /minSdk = 29/);
   assert.match(once, /ANDROID_KEYSTORE_PATH/);
   assert.match(once, /if \(System\.getenv\("ANDROID_KEYSTORE_PATH"\) != null\)/);
   assert.equal((once.match(/manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"false"/g) ?? []).length, 2);
