@@ -65,9 +65,7 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f package-lock.json ]; then
-            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          fi
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           if [ ! -f src-tauri/Cargo.lock ]; then
             cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
           else
@@ -85,6 +83,30 @@ jobs:
           git commit -m "chore: bootstrap dependency lockfiles"
           git push origin "HEAD:${GITHUB_REF_NAME}"
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  quality:
+    needs: prepare-lockfile
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run Node tests
+        run: npm test
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml -- --check
 
   windows:
     needs: prepare-lockfile
@@ -108,10 +130,6 @@ jobs:
           cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
-      - name: Run Node tests
-        run: npm test
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Fetch locked Rust dependencies
         run: |
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml
@@ -162,16 +180,15 @@ jobs:
           workspaces: src-tauri -> target
           cache-on-failure: true
       - run: npm ci
-      - name: Run Node tests
-        run: npm test
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Fetch locked Rust dependencies
         run: |
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Build ad-hoc DMG
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles dmg
+      - name: Run Rust library unit tests
+        if: ${{ matrix.target == 'aarch64-apple-darwin' }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --release --locked --target aarch64-apple-darwin
       - name: Collect DMG
         shell: bash
         run: |
@@ -222,10 +239,6 @@ jobs:
           cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
-      - name: Run Node tests
-        run: npm test
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Fetch locked Rust dependencies
         run: |
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml
@@ -273,10 +286,6 @@ jobs:
           cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
-      - name: Run Node tests
-        run: npm test
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Fetch locked Rust dependencies
         run: |
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml

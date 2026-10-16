@@ -1,6 +1,7 @@
 export function transition(state, event) {
-  if (event.type === 'retry' && (state === 'idle' || state === 'unavailable')) return 'checking';
-  if (event.type === 'available' && state === 'checking') return 'opening';
-  if (event.type === 'unavailable' && state === 'checking') return 'unavailable';
+  if (event.type === 'connect' && state !== 'connecting') return 'connecting';
+  if (event.type === 'ready' && state === 'connecting') return 'connected';
+  if (event.type === 'failed' && state === 'connecting') return 'failed';
+  if (event.type === 'settings') return 'settings';
   return state;
 }

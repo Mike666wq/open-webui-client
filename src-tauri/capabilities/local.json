@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-shell",
-  "description": "Allows the bundled startup page to check the configured service and open validated external links.",
+  "description": "Allows the bundled connection settings page to manage a connection.",
   "windows": ["main"],
   "local": true,
-  "permissions": ["allow-check-service", "allow-open-external"]
+  "permissions": [
+    "allow-get-connection-state",
+    "allow-connect-service"
+  ]
 }

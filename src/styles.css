@@ -19,7 +19,7 @@ body {
 }
 
 .panel {
-  width: min(100% - 40px, 460px);
+  width: min(100% - 40px, 500px);
   text-align: center;
   padding: 36px 28px;
 }
@@ -41,7 +41,10 @@ body {
 .eyebrow { color: #9ca3af; font-size: 11px; letter-spacing: .18em; }
 h1 { margin: 10px 0; font-size: clamp(22px, 5vw, 28px); }
 .detail { color: #b7c0ce; line-height: 1.6; }
-.address { margin: 20px 0; color: #7dd3b0; font: 13px ui-monospace, monospace; overflow-wrap: anywhere; }
-button { border: 0; border-radius: 9px; padding: 11px 18px; color: #092217; background: #86efac; font: inherit; font-weight: 650; cursor: pointer; }
+form { display: grid; gap: 10px; margin-top: 26px; text-align: left; }
+label { color: #d1d5db; font-size: 13px; font-weight: 600; }
+input { width: 100%; min-width: 0; border: 1px solid #52657e; border-radius: 9px; padding: 13px 14px; color: #f3f4f6; background: #111827; font: 14px ui-monospace, monospace; }
+input:focus { outline: 2px solid #86efac; outline-offset: 2px; }
+button { justify-self: start; margin-top: 6px; border: 0; border-radius: 9px; padding: 11px 18px; color: #092217; background: #86efac; font: inherit; font-weight: 650; cursor: pointer; }
 button:disabled { cursor: wait; opacity: .6; }
 .error { color: #fca5a5; font-size: 13px; overflow-wrap: anywhere; }

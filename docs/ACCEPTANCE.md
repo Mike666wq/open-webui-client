@@ -1,26 +1,40 @@
 # 验收清单
 
-## CI 构建验收
+## GitHub Actions 构建
 
-- [ ] 手动运行 workflow，选择 `desktop`，Windows x64 与 macOS Apple Silicon jobs 均成功。
-- [ ] Actions 中出现 NSIS setup.exe 与一份 Apple Silicon DMG，文件名含版本和架构。
-- [ ] push/Pull Request 的 Android debug 编译检查成功；该 job 不上传 APK，也不代表 release APK 已验收。
-- [ ] 手动选择 `android` 运行：缺少任一签名 secret 时，Android release job 明确失败，不会产出可交付的 debug APK。
-- [ ] 配齐签名 secrets 后，Android ARM64 job 生成 release APK，文件名含版本及 `android-arm64`。
-- [ ] 输入 `all` 时桌面与 Android jobs 独立运行，Android secrets 缺失不会阻断桌面 jobs。
-- [ ] 首次在无 `Cargo.lock` 的分支运行后，检查新增提交只包含 `src-tauri/Cargo.lock`；PR 缺锁时失败并指向该引导步骤。
+- [ ] 独立 quality job 的 npm tests 与 Rust 格式检查通过；它不阻挡同一轮平台 jobs 收集编译结果。
+- [ ] PR 和 push 中的 Windows x64、macOS Apple Silicon ARM64 构建成功并上传安装包。
+- [ ] macOS artifact 为一份 ARM64 ad-hoc DMG；Windows artifact 为包含离线 WebView2 Runtime 的 x64 NSIS `setup.exe`。
+- [ ] PR/push 的 Android ARM64 debug 编译检查成功；该 job 不上传 APK，也不表示 release APK 已验收。
+- [ ] 手动选择 `android` 时，缺少任一签名 secret 会使 Android release job 明确失败，不会生成可交付 debug APK。
+- [ ] 配齐签名 secrets 后，Android ARM64 job 生成固定密钥签名 release APK，文件名含版本及 `android-arm64`。
+- [ ] 手动选择 `all` 时，Android secrets 缺少不会阻止独立的桌面 jobs。
+- [ ] 锁文件引导只提交 `package-lock.json` 和/或 `src-tauri/Cargo.lock` 的真实变化；PR 只读验证锁文件。
 
-## 真实设备验收
+## Windows 与 macOS 真机验收
 
-以下检查必须在目标设备上完成并记录系统版本、设备型号、应用版本和结果。CI 产物存在不能替代这些检查。
+- [ ] Windows 10 与 Windows 11 x64 安装、首次启动、卸载；在未预装 WebView2 Runtime 的干净环境验证离线运行时安装。
+- [ ] macOS 12+ Apple Silicon 挂载、安装并启动 DMG；记录 ad-hoc 签名首次运行提示。
+- [ ] 原生菜单项和 `Ctrl+L` / `⌘L` 可随时打开本地连接设置；保存地址并重连后进入服务页面。
 
-- [ ] Windows 10 与 Windows 11 x64 安装、首次启动、卸载；在没有预装 WebView2 Runtime 的干净环境检查离线运行时安装。
-- [ ] macOS 12+ Apple Silicon 挂载、安装并启动 DMG；记录 ad-hoc 签名首次运行时的系统提示。
-- [ ] Android 10+ ARM64 安装签名 APK、启动、卸载；确认签名证书与预期固定 keystore 一致。
-- [ ] 客户端能够解析 `mint` 并访问 `http://mint:3000`，完成 Open WebUI 登录及至少一次对话。
-- [ ] Android 验证 `mint` 的 HTTP 可访问，同时其他主机的 HTTP 请求不会被该明文例外放行。
-- [ ] 检查断网、服务不可用时的错误反馈，以及重新连接后的恢复。
+## Android 真机验收
 
-## 当前明确不验收的功能
+- [ ] Android 10+ ARM64 安装固定密钥签名 APK、启动、卸载，并确认签名证书匹配维护者预期。
+- [ ] 首次打开显示本地连接页，默认地址为 `http://192.168.31.60:3000`。
+- [ ] 对 HTTP 和 HTTPS 的 IPv4/IPv6 地址、域名、子域名、不同端口及根路径进行连接验证；输入规范化正确且成功地址可持久保存。
+- [ ] 无效地址、服务不可用或 30 秒内连接失败时回到设置页、保留候选输入，不覆盖上次成功地址；恢复服务后可重新连接。
+- [ ] 强制结束并重启应用后自动连接到最近一次成功地址。
+- [ ] 在远程服务页面按 Android 系统返回键回到 bundled 本地设置页；在本地设置页再次按系统返回键退出，不返回远程页面。
+- [ ] HTTP 按明文传输显示并说明风险；HTTPS 使用系统默认证书验证，证书无效时不得忽略或绕过错误。
 
-阶段一不提供 HTTPS 或自定义 URL、后台通知、自动更新，也不提供 macOS 公证或 Windows 商业签名。相关功能不能描述为已实现或通过验收。
+## 网络策略验证
+
+- [ ] Android 配置允许用户选择的任意 HTTP host/IP/端口，不局限于默认地址；确认网络策略同时允许 HTTP 和 HTTPS。
+- [ ] macOS `Info.plist` 只声明 `NSAllowsLocalNetworking`，不设置 `NSAllowsArbitraryLoadsInWebContent` 或 `NSAllowsArbitraryLoads`。验证 HTTP IPv4/IPv6 与 `.local` 地址的实际系统行为；公开 DNS 域名 HTTP 可能由 ATS 拒绝，须记录结果，不作为任意 HTTP 域名已支持的承诺。
+- [ ] Android、Windows WebView2 和 macOS WKWebView 对 HTTPS 无效证书维持平台默认拒绝行为。
+
+每条真机检查需记录设备型号、OS 版本、应用版本、目标地址、结果及必要日志。GitHub Actions artifact 存在或 CI 成功不能替代上述设备检查。
+
+## 当前未实现
+
+后台通知、自动更新、macOS 公证、Apple Developer ID 正式签名、Windows 商业签名和商店发布尚未实现，也不属于当前验收通过项。

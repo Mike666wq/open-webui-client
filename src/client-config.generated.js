@@ -1,4 +1,3 @@
 export default Object.freeze({
-  "serviceUrl": "http://mint:3000",
-  "preflightTimeoutMs": 5000
+  "defaultServiceUrl": "http://192.168.31.60:3000"
 });

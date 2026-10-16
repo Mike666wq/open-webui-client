@@ -7,11 +7,13 @@ const projectRoot = path.resolve(here, '..');
 const androidRoot = path.join(projectRoot, 'src-tauri', 'gen', 'android');
 const ANDROID_SDK_LEVEL = 36;
 
-const networkConfig = `<?xml version="1.0" encoding="utf-8"?>
+export const networkSecurityConfigXml = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">mint</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>
 `;
 
@@ -20,7 +22,7 @@ export function updateManifest(source) {
     throw new Error('AndroidManifest.xml is missing a manifest or application element');
   }
   if (/android:usesCleartextTraffic\s*=\s*["']true["']/i.test(source)) {
-    throw new Error('Refusing a global usesCleartextTraffic setting; cleartext must be scoped to mint');
+    throw new Error('Refusing a global usesCleartextTraffic setting; use the Android network security config');
   }
 
   let result = source;
@@ -88,7 +90,7 @@ export async function prepareAndroidProject(root = projectRoot) {
   const resourceDir = path.join(mainDir, 'res', 'xml');
   const { mkdir } = await import('node:fs/promises');
   await mkdir(resourceDir, { recursive: true });
-  await writeFile(path.join(resourceDir, 'network_security_config.xml'), networkConfig);
+  await writeFile(path.join(resourceDir, 'network_security_config.xml'), networkSecurityConfigXml);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

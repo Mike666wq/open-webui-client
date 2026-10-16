@@ -1,0 +1,15 @@
+[package]
+name = "tauri-plugin-connection-controls"
+version = "0.1.0"
+edition = "2024"
+links = "tauri-plugin-connection-controls"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "=2.12.3", default-features = false }
+
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+tauri = { version = "=2.12.3", features = ["wry"] }
+
+[build-dependencies]
+tauri-plugin = { version = "=2.7.1", features = ["build"] }

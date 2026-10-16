@@ -3,7 +3,13 @@
     try {
       const url = new URL(value, window.location.href);
       if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) return;
-      window.__TAURI__?.core?.invoke('open-external', { url: url.href }).catch(() => {});
+      const session = window.__OWC_SESSION__;
+      if (!session) return;
+      window.__TAURI__?.core?.invoke('open-external', {
+        url: url.href,
+        generation: session.generation,
+        sessionToken: session.token,
+      }).catch(() => {});
     } catch {}
   };
 

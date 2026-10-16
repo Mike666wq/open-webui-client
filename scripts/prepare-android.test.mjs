@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { updateGradle, updateManifest } from './prepare-android.mjs';
+import { networkSecurityConfigXml, updateGradle, updateManifest } from './prepare-android.mjs';
 
-test('manifest scopes cleartext permission to mint and preserves existing attributes', () => {
+test('manifest installs the network policy and preserves existing attributes', () => {
   const input = '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Client"></application></manifest>';
   const once = updateManifest(input);
   assert.match(once, /android:label="Client"/);
   assert.match(once, /android:networkSecurityConfig="@xml\/network_security_config"/);
   assert.equal(updateManifest(once), once);
+  assert.match(networkSecurityConfigXml, /<base-config cleartextTrafficPermitted="true">/);
+  assert.match(networkSecurityConfigXml, /<certificates src="system"\s*\/>/);
+  assert.doesNotMatch(networkSecurityConfigXml, /<certificates src="user"/);
+  assert.doesNotMatch(networkSecurityConfigXml, /<domain-config|mint/);
   assert.throws(() => updateManifest(once.replace('<application', '<application android:usesCleartextTraffic="true"')), /global usesCleartextTraffic/);
   assert.match(updateManifest(input.replace('<application', '<application android:usesCleartextTraffic="${usesCleartextTraffic}"')), /usesCleartextTraffic="\$\{usesCleartextTraffic\}"/);
 });

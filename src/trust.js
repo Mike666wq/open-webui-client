@@ -1,24 +1,25 @@
 export function validateServiceUrl(value) {
   let url;
   try {
-    url = new URL(value);
+    url = new URL(String(value).trim());
   } catch {
-    throw new TypeError('serviceUrl must be an absolute URL');
+    throw new TypeError('Enter a valid HTTP or HTTPS address.');
   }
 
   if (
-    url.protocol !== 'http:' ||
+    !['http:', 'https:'].includes(url.protocol) ||
     !url.hostname ||
+    url.hostname === 'tauri.localhost' ||
     url.username ||
     url.password ||
     url.pathname !== '/' ||
     url.search ||
     url.hash
   ) {
-    throw new TypeError('serviceUrl must be a plain HTTP origin without credentials or path');
+    throw new TypeError('Use an HTTP or HTTPS address without a path, query, credentials, or fragment.');
   }
 
-  return url;
+  return new URL(url.origin);
 }
 
 export function classifyNavigation(value, serviceUrl, localOrigins, devOrigin = null) {

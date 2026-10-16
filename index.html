@@ -10,10 +10,13 @@
     <main class="panel" aria-live="polite">
       <div class="mark" aria-hidden="true">W</div>
       <p class="eyebrow">OPEN WEBUI CLIENT</p>
-      <h1 id="heading">Connecting to your server</h1>
-      <p id="detail" class="detail">Checking the configured service address…</p>
-      <div id="service-address" class="address"></div>
-      <button id="retry" type="button" hidden>Try again</button>
+      <h1 id="heading">Connect to your server</h1>
+      <p id="detail" class="detail">Enter the address of your Open WebUI server.</p>
+      <form id="connect-form">
+        <label for="service-address">Server address</label>
+        <input id="service-address" name="service-address" type="url" inputmode="url" autocomplete="url" spellcheck="false" required />
+        <button id="connect" type="submit">Connect</button>
+      </form>
       <p id="error" class="error" role="alert" hidden></p>
     </main>
     <script type="module" src="/src/app.js"></script>

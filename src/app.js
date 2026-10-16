@@ -1,46 +1,64 @@
 import { invoke } from '@tauri-apps/api/core';
 import clientConfig from './client-config.generated.js';
 import { transition } from './connection-state.js';
+import { validateServiceUrl } from './trust.js';
 import './styles.css';
 
 const heading = document.querySelector('#heading');
 const detail = document.querySelector('#detail');
 const address = document.querySelector('#service-address');
-const retry = document.querySelector('#retry');
+const form = document.querySelector('#connect-form');
+const connectButton = document.querySelector('#connect');
 const error = document.querySelector('#error');
-let state = 'idle';
-
-address.textContent = clientConfig.serviceUrl;
+let state = 'settings';
 
 function render(nextState, message = '') {
-  state = nextState;
-  const checking = state === 'checking';
-  heading.textContent = checking
-    ? 'Connecting to your server'
-    : state === 'opening'
-      ? 'Opening Open WebUI'
-      : 'Server is unavailable';
-  detail.textContent = checking
-    ? 'Checking the configured service address…'
-    : state === 'opening'
-      ? 'The service responded. Loading it in this window…'
-      : 'Check that the server is running and reachable, then try again.';
-  retry.hidden = checking || state === 'opening';
-  retry.disabled = checking;
+  state = transition(state, { type: nextState });
+  const connecting = state === 'connecting';
+  heading.textContent = connecting ? 'Connecting to your server' : 'Connect to your server';
+  detail.textContent = connecting
+    ? 'Opening the server and checking that Open WebUI is ready…'
+    : 'Enter the address of your Open WebUI server.';
+  connectButton.disabled = connecting;
+  connectButton.textContent = connecting ? 'Connecting…' : 'Connect';
   error.hidden = !message;
   error.textContent = message;
 }
 
-async function connect() {
-  state = transition(state, { type: 'retry' });
-  render(state);
+async function connect(event) {
+  event?.preventDefault();
+  let service;
   try {
-    await invoke('check-service');
-    render(transition(state, { type: 'available' }));
+    service = validateServiceUrl(address.value);
   } catch (cause) {
-    render(transition(state, { type: 'unavailable' }), String(cause));
+    render('failed', cause.message);
+    return;
+  }
+  address.value = service.origin;
+  render('connect');
+  try {
+    await invoke('connect-service', { address: service.origin });
+  } catch (cause) {
+    render('failed', String(cause));
   }
 }
 
-retry.addEventListener('click', connect);
-connect();
+form.addEventListener('submit', connect);
+
+async function initialize() {
+  address.value = clientConfig.defaultServiceUrl;
+  try {
+    const state = await invoke('get-connection-state');
+    address.value = state.candidateUrl || state.lastSuccessUrl || clientConfig.defaultServiceUrl;
+    if (state.error) render('failed', state.error);
+    if (state.startupUrl) {
+      address.value = state.startupUrl;
+      await invoke('connect-service', { address: state.startupUrl });
+      render('connect');
+    }
+  } catch (cause) {
+    render('failed', `Could not load connection settings: ${String(cause)}`);
+  }
+}
+
+initialize();
