@@ -702,7 +702,7 @@ mod tests {
         let original = url("https://saved.example.org");
         let manager = ConnectionManager(Arc::new(Mutex::new(ConnectionRuntime::new(Some(
             original.clone(),
-        ))));
+        )))));
         let attempt = manager.begin(url("http://new.example.org:8080"));
         let persistence = manager.complete_ready(
             attempt.generation,
@@ -779,3 +779,4 @@ mod tests {
         assert_eq!(state.consume_startup_url(), None);
     }
 }
+
