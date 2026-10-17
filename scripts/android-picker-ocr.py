@@ -44,7 +44,9 @@ def locate_save(source, evidence):
     for index, (left, top, w, h) in enumerate(regions):
         crop = evidence / f'save-candidate-{index}.png'
         subprocess.run(['convert', str(source), '-crop', f'{w}x{h}+{left}+{top}', '+repage',
-                        '-colorspace', 'Gray', '-negate', '-resize', '300%', '-bordercolor', 'white',
+                        '-shave', f'{max(1, w//10)}x{max(1, h//6)}',
+                        '-colorspace', 'Gray', '-negate', '-auto-level', '-threshold', '50%',
+                        '-resize', '300%', '-bordercolor', 'white',
                         '-border', '20', str(crop)], check=True, timeout=30)
         tsv = subprocess.check_output(['tesseract', str(crop), 'stdout', '--psm', '7', 'tsv'], text=True, timeout=30)
         (evidence / f'save-candidate-{index}.tsv').write_text(tsv, encoding='utf-8')
