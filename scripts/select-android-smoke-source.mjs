@@ -29,12 +29,40 @@ export function selectAndroidSmokeSource({ eventName, requestedSource = 'baselin
   return hasBehaviorChange ? 'current' : V0_2_2_SOURCE_SHA;
 }
 
+export function resolveAndroidSmokeSource({
+  eventName, pinnedSourceSha = '', sourceLabel = '', currentSha,
+  requestedSource = 'baseline', changedPaths = [],
+}) {
+  // Reusable workflows inherit the caller's event_name (e.g. workflow_dispatch).
+  // Explicit immutable inputs must take precedence over that inherited event.
+  if (pinnedSourceSha || sourceLabel || eventName === 'workflow_call') {
+    if (!/^[0-9a-f]{40}$/.test(pinnedSourceSha)) {
+      throw new Error('Pinned Android smoke source requires a 40-character immutable commit SHA');
+    }
+    if (!/^[a-z0-9-]{1,40}$/.test(sourceLabel)) {
+      throw new Error('Pinned Android smoke source label is invalid');
+    }
+    return { sourceSha: pinnedSourceSha, sourceKind: sourceLabel };
+  }
+  const selected = selectAndroidSmokeSource({ eventName, requestedSource, changedPaths });
+  if (selected === 'current') {
+    if (!/^[0-9a-f]{40}$/.test(currentSha ?? '')) {
+      throw new Error('Current Android smoke source requires a 40-character commit SHA');
+    }
+    return { sourceSha: currentSha, sourceKind: 'current' };
+  }
+  return { sourceSha: selected, sourceKind: 'v0.2.2-baseline' };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const changedPaths = JSON.parse(process.env.ANDROID_SMOKE_CHANGED_PATHS ?? '[]');
-  const source = selectAndroidSmokeSource({
+  const result = resolveAndroidSmokeSource({
     eventName: process.env.GITHUB_EVENT_NAME,
-    requestedSource: process.env.ANDROID_SMOKE_SOURCE ?? 'baseline',
-    changedPaths,
+    requestedSource: process.env.ANDROID_SMOKE_REQUESTED_SOURCE ?? 'baseline',
+    pinnedSourceSha: process.env.ANDROID_SMOKE_PINNED_SOURCE_SHA ?? '',
+    sourceLabel: process.env.ANDROID_SMOKE_SOURCE_LABEL ?? '',
+    currentSha: process.env.ANDROID_SMOKE_SHA,
+    changedPaths: JSON.parse(process.env.ANDROID_SMOKE_CHANGED_PATHS ?? '[]'),
   });
-  console.log(`source=${source}`);
+  console.log(`source_sha=${result.sourceSha}`);
+  console.log(`source_kind=${result.sourceKind}`);
 }

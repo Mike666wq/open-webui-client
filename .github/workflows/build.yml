@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
@@ -52,7 +54,7 @@ jobs:
 
   quality:
     needs: prepare-lockfile
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +96,14 @@ jobs:
         run: |
           cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
           cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml -- --check
+
+  pull-request-android-smoke:
+    needs: [prepare-lockfile, quality]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    uses: ./.github/workflows/android-emulator-diagnose.yml
+    with:
+      source_sha: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      source_label: pull-request
 
   cleanup-merged-stage-branches:
     needs: quality

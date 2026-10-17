@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { PNG } from 'pngjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,21 +69,59 @@ export function validateAndroidApkIcons(resourceDump, manifestTree) {
   }
   return true;
 }
-export function validateAndroidApkIconPayloads(entries, readArchiveEntry, readGeneratedIcon) {
+// AAPT2 may shorten archive paths and recompress PNGs. Resolve the paths from
+// the compiled resource table, then compare decoded pixels rather than ZIP names
+// or compressed bytes. This still rejects missing, duplicated or altered icons.
+export function androidIconPaths(resourceDump) {
+  const paths = new Map();
+  let resource;
+  for (const line of resourceDump.split(/\r?\n/)) {
+    const header = line.match(/^\s*resource\s+0x[0-9a-f]+\s+(?:[^:\s]+:)?([^\s]+)/i);
+    if (header) resource = header[1];
+    if (!/^mipmap\/ic_launcher(?:_round|_foreground)?$/.test(resource ?? '')) continue;
+    const value = line.match(/^\s*\(([^)]*)\)\s+\(file\)\s+(\S+)/);
+    if (!value || !/^(?:mdpi|hdpi|xhdpi|xxhdpi|xxxhdpi)(?:-v\d+)?$/.test(value[1])) continue;
+    const density = value[1].split('-')[0];
+    const name = resource.slice('mipmap/'.length) + '.png';
+    const key = `${density}/${name}`;
+    if (paths.has(key)) throw new Error(`APK has multiple ${density} ${name} resource values`);
+    if (!/^res\/[^\s]+\.png$/.test(value[2]) || value[2].split('/').includes('..')) {
+      throw new Error(`APK has an invalid ${density} ${name} resource path`);
+    }
+    paths.set(key, value[2]);
+  }
+  return paths;
+}
+
+function decodeIcon(bytes, description) {
+  let image;
+  try {
+    image = PNG.sync.read(bytes);
+  } catch {
+    throw new Error(`Could not decode ${description} as a PNG`);
+  }
+  // AAPT may discard invisible RGB values when alpha is zero.
+  for (let i = 0; i < image.data.length; i += 4) {
+    if (image.data[i + 3] === 0) image.data.fill(0, i, i + 3);
+  }
+  return image;
+}
+
+export function validateAndroidApkIconPayloads(resourceDump, entries, readArchiveEntry, readGeneratedIcon) {
+  const paths = androidIconPaths(resourceDump);
+  const archiveEntries = entries.split(/\r?\n/);
   const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
   const names = ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png'];
   for (const density of densities) {
     for (const name of names) {
-      const suffix = new RegExp('^res/mipmap-' + density + '(?:-v\\d+)?/' + name.replaceAll('.', '\\.') + '$');
-      const matches = entries.split(/\r?\n/).filter((entry) => suffix.test(entry));
-      if (matches.length !== 1) {
+      const entry = paths.get(`${density}/${name}`);
+      if (!entry || archiveEntries.filter((candidate) => candidate === entry).length !== 1) {
         throw new Error(`APK must contain exactly one ${density} ${name} resource`);
       }
-      const generated = readGeneratedIcon(density, name);
-      const packaged = readArchiveEntry(matches[0]);
-      const expectedHash = createHash('sha256').update(generated).digest('hex');
-      const actualHash = createHash('sha256').update(packaged).digest('hex');
-      if (actualHash !== expectedHash) {
+      const generated = decodeIcon(readGeneratedIcon(density, name), `generated ${density} ${name}`);
+      const packaged = decodeIcon(readArchiveEntry(entry), `packaged ${density} ${name}`);
+      if (generated.width !== packaged.width || generated.height !== packaged.height ||
+          !generated.data.equals(packaged.data)) {
         throw new Error(`Packaged ${density} ${name} does not match the generated official icon`);
       }
     }
@@ -134,24 +172,42 @@ export function verifyAndroidApk(apkPath, versionCode, {
   validateSigningFingerprint(certificate, signature);
   const aapt = path.join(buildTools, 'aapt');
   const badging = run(aapt, ['dump', 'badging', absoluteApk]);
-  const resources = run(aapt, ['dump', '--values', 'resources', absoluteApk]);
-  const manifestTree = run(aapt, ['dump', 'xmltree', absoluteApk, 'AndroidManifest.xml']);
   const entries = run('unzip', ['-Z1', absoluteApk]);
-  validateAndroidApkIcons(resources, manifestTree);
-  validateAndroidApkIconPayloads(
-    entries,
-    (entry) => runBytes('unzip', ['-p', absoluteApk, entry]),
-    (density, name) => readFileSync(path.join('src-tauri/gen/android/app/src/main/res', `mipmap-${density}`, name)),
-  );
+  verifyAndroidApkIconResources(absoluteApk, { androidHome });
   return validateAndroidApkMetadata({ badging, entries, versionCode });
+}
+
+export function verifyAndroidApkIconResources(apkPath, {
+  androidHome = process.env.ANDROID_HOME,
+  resourceRoot = 'src-tauri/gen/android/app/src/main/res',
+} = {}) {
+  if (!androidHome) throw new Error('ANDROID_HOME is required to verify APK icons');
+  const absoluteApk = path.resolve(apkPath);
+  const buildTools = path.join(androidHome, 'build-tools', '36.0.0');
+  const resources = run(path.join(buildTools, 'aapt2'), ['dump', 'resources', absoluteApk]);
+  const manifestTree = run(path.join(buildTools, 'aapt'), ['dump', 'xmltree', absoluteApk, 'AndroidManifest.xml']);
+  // Existing startup-theme validation uses the legacy AAPT style/attribute format.
+  const legacyResources = run(path.join(buildTools, 'aapt'), ['dump', '--values', 'resources', absoluteApk]);
+  validateAndroidApkIcons(legacyResources, manifestTree);
+  return validateAndroidApkIconPayloads(
+    resources,
+    run('unzip', ['-Z1', absoluteApk]),
+    (entry) => runBytes('unzip', ['-p', absoluteApk, entry]),
+    (density, name) => readFileSync(path.join(resourceRoot, `mipmap-${density}`, name)),
+  );
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [, , apkPath, rawVersionCode] = process.argv;
-    if (!apkPath || !rawVersionCode) throw new Error('Usage: node scripts/verify-android-apk.mjs <apk-path> <version-code>');
-    const result = verifyAndroidApk(apkPath, Number(rawVersionCode));
-    process.stdout.write(`Verified signed ARM64 APK ${result.applicationId}, minSdk ${result.minSdk}, versionCode ${result.versionCode}.\n`);
+    if (apkPath && rawVersionCode === '--icons-only') {
+      verifyAndroidApkIconResources(apkPath);
+      process.stdout.write('Verified compiled APK launcher resources and official icon pixels.\n');
+    } else {
+      if (!apkPath || !rawVersionCode) throw new Error('Usage: node scripts/verify-android-apk.mjs <apk-path> <version-code>');
+      const result = verifyAndroidApk(apkPath, Number(rawVersionCode));
+      process.stdout.write(`Verified signed ARM64 APK ${result.applicationId}, minSdk ${result.minSdk}, versionCode ${result.versionCode}.\n`);
+    }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
