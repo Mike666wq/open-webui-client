@@ -123,7 +123,23 @@ def tap_any(labels, *, timeout=20):
 def save_to_downloads():
     tap_any(['Show roots', 'Show navigation drawer', 'Open navigation drawer'])
     tap_any(['Downloads', 'Download'])
-    tap_any(['SAVE', 'Save'])
+    # API29 DocumentsUI can expose visible bottom controls with empty bounds.
+    # Keyboard focus supplies an independent semantic target without guessing
+    # screen coordinates; verify SAVE itself owns focus before pressing Enter.
+    controls = nodes('save-controls')
+    visible_save = any(n.get('text') in ('SAVE', 'Save') and bounds(n)[2] > bounds(n)[0]
+                       and bounds(n)[3] > bounds(n)[1] for n in controls)
+    if visible_save:
+        tap_any(['SAVE', 'Save'])
+    else:
+        for _ in range(16):
+            shell('input keyevent KEYCODE_TAB')
+            focused = nodes('save-keyboard-focus')
+            if any(n.get('text') in ('SAVE', 'Save') and n.get('focused') == 'true' for n in focused):
+                shell('input keyevent KEYCODE_ENTER')
+                break
+        else:
+            raise AssertionError('UNVERIFIED: SAVE control cannot be focused')
     time.sleep(2)
 
 
@@ -191,8 +207,8 @@ class Fixture(BaseHTTPRequestHandler):
 <style>body{{margin:0;background:#161616;color:white;font:18px sans-serif}}header{{padding:12px}} textarea{{display:block;width:90%;height:80px;font-size:18px}}button,a{{display:block;padding:14px;margin:8px}}main{{height:1300px}}footer{{position:fixed;bottom:0;background:#333;width:100%;height:44px}}</style>
 <header id="fixture-header">Fixture header {port}</header><textarea id="draft" aria-label="Draft">draft-kept</textarea>
 <button id="next-route" onclick="history.pushState({{}},'', '/next');document.querySelector('#route').textContent='Second route'">Next route</button><p id="route">First route</p>
-<button id="download-fixture" onclick="let a=document.createElement('a');a.download='fixture.txt';a.href=URL.createObjectURL(new Blob(['fixture-download']));a.click()">Download fixture</button>
-<button id="probe-native" onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p>
+<button id="download-fixture" onclick="let a=document.createElement('a');a.download='fixture.txt';a.href=URL.createObjectURL(new Blob(['fixture-download']));document.body.appendChild(a);a.click();a.remove();document.querySelector('#download-state').textContent='Download clicked'">Download fixture</button>
+<button id="probe-native" onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p><output id="download-state"></output>
 <output id="scroll-state" style="position:fixed;right:0;top:60px;font-size:10px">Scroll 0</output>
 <script>onpopstate=()=>document.querySelector('#route').textContent=location.pathname==='/next'?'Second route':'First route';onscroll=()=>document.querySelector('#scroll-state').textContent='Scroll '+Math.round(scrollY);</script>
 <main><span id="page-nonce">Page nonce: {time.time_ns()}</span></main><footer>Fixture bottom</footer>
@@ -205,7 +221,7 @@ function reportFixture() {{
     var element = document.querySelector(selectors[label]); var r = element.getBoundingClientRect();
     entries.push({{label:label,text:element.value || element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
   }});
-  ['#route','#security','#scroll-state','#page-nonce'].forEach(function(selector) {{
+  ['#route','#security','#scroll-state','#page-nonce','#download-state'].forEach(function(selector) {{
     var element = document.querySelector(selector); var r = element.getBoundingClientRect();
     entries.push({{label:element.textContent,text:element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
   }});
@@ -382,10 +398,12 @@ try:
     save_to_downloads()
     report = shell('cat /sdcard/Download/android-diagnostics.txt')
     assert report and '127.0.0.1' not in report and 'http://' not in report, 'Diagnostic privacy regression'
-    tap('Download fixture'); time.sleep(2)
+    tap('Download fixture')
+    find('fixture.txt'); screenshot('download-picker-cancel')
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
     find('Client menu')
-    tap('Download fixture'); time.sleep(2)
+    tap('Download fixture')
+    find('fixture.txt'); screenshot('download-picker-save')
     save_to_downloads()
     assert shell('cat /sdcard/Download/fixture.txt').strip() == 'fixture-download', 'Downloaded payload changed'
     screenshot('native-experience-pass')
