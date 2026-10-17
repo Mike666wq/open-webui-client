@@ -36,20 +36,31 @@ test('APK signer certificate must match the configured fixed keystore', () => {
   assert.throws(() => validateSigningFingerprint(keytool, `${signer}\nSigner #2 certificate SHA-256 digest: ${signerDigest}`), /does not match/);
 });
 
-test('built APK must contain launcher, round, adaptive foreground and splash icon resources', () => {
+test('built APK theme must reference Android 12 splash attributes by compiled ID', () => {
   const resources = `
     resource mipmap/ic_launcher:
     resource mipmap/ic_launcher_round:
     resource mipmap/ic_launcher_foreground:
     resource color/ic_launcher_background:
-    android:windowSplashScreenAnimatedIcon
-    android:windowSplashScreenBackground
+    resource 0x7f010001 com.example:style/AppTheme:
+      0x0101062d android:attr/windowSplashScreenAnimatedIcon:
+      0x0101062c android:attr/windowSplashScreenBackground:
   `;
-  assert.equal(validateAndroidApkIcons(resources), true);
-  assert.throws(() => validateAndroidApkIcons(resources.replace('mipmap/ic_launcher_round', 'mipmap/other')), /ic_launcher_round/);
-  assert.throws(() => validateAndroidApkIcons(resources.replace('windowSplashScreenAnimatedIcon', 'other')), /splash-screen/);
+  const manifestTree = `
+    E: application
+      A: android:theme(0x01010000)=@0x7f010001
+  `;
+  assert.equal(validateAndroidApkIcons(resources, manifestTree), true);
+  assert.throws(() => validateAndroidApkIcons(
+    resources.replace('mipmap/ic_launcher_round', 'mipmap/other'),
+    manifestTree,
+  ), /ic_launcher_round/);
+  assert.throws(() => validateAndroidApkIcons(
+    resources.replace('0x0101062d', '0x0101062e'),
+    manifestTree,
+  ), /splash-screen/);
+  assert.throws(() => validateAndroidApkIcons(resources, ''), /startup theme/);
 });
-
 test('packaged launcher PNG payloads must match every generated official density icon', () => {
   const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
   const names = ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png'];

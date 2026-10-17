@@ -38,7 +38,7 @@ export function validateSigningFingerprint(keystoreOutput, apkOutput) {
   return true;
 }
 
-export function validateAndroidApkIcons(resourceDump) {
+export function validateAndroidApkIcons(resourceDump, manifestTree) {
   for (const resource of [
     'mipmap/ic_launcher',
     'mipmap/ic_launcher_round',
@@ -49,13 +49,26 @@ export function validateAndroidApkIcons(resourceDump) {
       throw new Error(`APK is missing the official launcher icon resource ${resource}`);
     }
   }
-  if (!resourceDump.includes('windowSplashScreenAnimatedIcon') ||
-      !resourceDump.includes('windowSplashScreenBackground')) {
-    throw new Error('APK is missing Android 12 splash-screen icon resources');
+
+  const splashAttributeIds = ['0x0101062d', '0x0101062c'];
+  const startupThemeIds = [...manifestTree.matchAll(
+    /A: android:theme\([^)]*\)=@(?:0x)?([0-9a-f]+)/gi,
+  )].map((match) => `0x${match[1].toLowerCase()}`);
+  if (startupThemeIds.length === 0) {
+    throw new Error('APK manifest does not assign an application or activity startup theme');
+  }
+
+  const styleBlocks = resourceDump.split(/(?=^[ \t]*resource\s+0x[0-9a-f]+\s+[^\r\n]*:style)/gim);
+  const startupStyles = styleBlocks.filter((block) =>
+    startupThemeIds.some((id) => new RegExp(`^[ \t]*resource\\s+${id}\\b`, 'im').test(block)),
+  );
+  if (!startupStyles.some((block) =>
+    splashAttributeIds.every((id) => new RegExp(`\\b${id}\\b`, 'i').test(block)),
+  )) {
+    throw new Error('APK startup theme does not reference both Android 12 splash-screen attributes');
   }
   return true;
 }
-
 export function validateAndroidApkIconPayloads(entries, readArchiveEntry, readGeneratedIcon) {
   const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
   const names = ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png'];
@@ -119,10 +132,12 @@ export function verifyAndroidApk(apkPath, versionCode, {
     '-storepass:env', 'ANDROID_KEYSTORE_PASSWORD', '-alias', 'openwebui-client',
   ], { ...process.env, ANDROID_KEYSTORE_PASSWORD: keystorePassword });
   validateSigningFingerprint(certificate, signature);
-  const badging = run(path.join(buildTools, 'aapt'), ['dump', 'badging', absoluteApk]);
-  const resources = run(path.join(buildTools, 'aapt'), ['dump', 'resources', absoluteApk]);
+  const aapt = path.join(buildTools, 'aapt');
+  const badging = run(aapt, ['dump', 'badging', absoluteApk]);
+  const resources = run(aapt, ['dump', '--values', 'resources', absoluteApk]);
+  const manifestTree = run(aapt, ['dump', 'xmltree', absoluteApk, 'AndroidManifest.xml']);
   const entries = run('unzip', ['-Z1', absoluteApk]);
-  validateAndroidApkIcons(resources);
+  validateAndroidApkIcons(resources, manifestTree);
   validateAndroidApkIconPayloads(
     entries,
     (entry) => runBytes('unzip', ['-p', absoluteApk, entry]),
