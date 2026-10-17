@@ -289,11 +289,25 @@ try:
     draft = find('Draft')
     button = find('Client menu')
     keyboard_nodes = [n for n in current if n.get('package', '').startswith(('com.google.android.inputmethod', 'com.android.inputmethod'))]
-    assert keyboard_nodes, 'UNVERIFIED: software keyboard not exposed'
-    keyboard_top = min(bounds(n)[1] for n in keyboard_nodes if bounds(n)[3] > bounds(n)[1])
-    assert bounds(draft)[3] <= keyboard_top, 'Draft covered by keyboard'
-    assert bounds(button)[3] <= keyboard_top, 'Menu covered by keyboard'
-    assert bounds(find('Fixture bottom'))[3] <= keyboard_top, 'Bottom composer covered by keyboard'
+    if keyboard_nodes:
+        keyboard_top = min(bounds(n)[1] for n in keyboard_nodes if bounds(n)[3] > bounds(n)[1])
+    else:
+        # UIAutomator commonly emits only the foreground app's hierarchy, even
+        # while Gboard is visible. Derive the IME content top from WindowManager,
+        # retaining its real surface/visibility requirement and raw evidence.
+        keyboard_dump = window_evidence('keyboard')
+        ime_blocks = [block for block in re.split(r'Window #\d+', keyboard_dump)
+                      if re.match(r'\s*Window\{[^\n]* u\d+ InputMethod\}:', block)]
+        assert len(ime_blocks) == 1, 'UNVERIFIED: IME window unavailable'
+        ime_window = ime_blocks[0]
+        assert 'mHasSurface=true' in ime_window and 'isVisible=true' in ime_window, 'IME window is not visible'
+        content = re.search(r'mGivenContentInsets=\[0,(\d+)\]', ime_window)
+        assert content and int(content[1]) > 0, 'UNVERIFIED: IME content geometry unavailable'
+        keyboard_top = int(content[1])
+    # WebView virtual CSS bounds may round a device-pixel edge by <=3 pixels.
+    assert bounds(draft)[3] <= keyboard_top + 3, 'Draft covered by keyboard'
+    assert bounds(button)[3] <= keyboard_top + 3, 'Menu covered by keyboard'
+    assert bounds(find('Fixture bottom'))[3] <= keyboard_top + 3, 'Bottom composer covered by keyboard'
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
     assert abs(bounds(find('Client menu'))[1] - drag_y) <= 4, 'Keyboard overwrote saved menu position'
 
