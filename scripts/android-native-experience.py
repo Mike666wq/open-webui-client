@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """GitHub-runner-only end-to-end gate. Uses synthetic services, never user data."""
 import argparse
-import csv
-import io
 import json
 import re
 import subprocess
@@ -137,20 +135,11 @@ def save_to_downloads():
         assert any(n.get('text') in ('SAVE', 'Save') and n.get('enabled') == 'true'
                    and n.get('package') == 'com.android.documentsui' for n in controls), 'SAVE is not enabled'
         screenshot('save-ocr')
-        # White text on the blue Material button is missed by sparse OCR on
-        # the original screenshot. Invert luminance for dark text recognition.
-        subprocess.run(['convert', str(OUT / 'save-ocr.png'), '-colorspace', 'Gray', '-negate',
-                        str(OUT / 'save-ocr-inverted.png')], check=True, timeout=30)
-        ocr = subprocess.run(['tesseract', str(OUT / 'save-ocr-inverted.png'), 'stdout', '--psm', '11', 'tsv'],
-                             capture_output=True, text=True, check=True, timeout=30).stdout
-        (OUT / 'save-ocr.tsv').write_text(ocr, encoding='utf-8')
-        matches = [row for row in csv.DictReader(io.StringIO(ocr), delimiter='\t')
-                   if row['text'].strip().upper() == 'SAVE' and float(row['conf']) >= 80]
-        assert len(matches) == 1, 'UNVERIFIED: visible SAVE text is not unique/confident'
-        row = matches[0]
-        x, y, width, height = (int(row[key]) for key in ('left', 'top', 'width', 'height'))
-        assert width > 0 and height > 0, 'UNVERIFIED: SAVE OCR has empty bounds'
-        shell(f'input tap {x + width//2} {y + height//2}')
+        location = json.loads(subprocess.check_output([
+            'python3', str(Path(__file__).with_name('android-picker-ocr.py')),
+            '--image', str(OUT / 'save-ocr.png'), '--evidence', str(OUT / 'save-ocr-evidence'),
+        ], text=True, timeout=60))
+        shell(f"input tap {location['x']} {location['y']}")
     time.sleep(2)
 
 
