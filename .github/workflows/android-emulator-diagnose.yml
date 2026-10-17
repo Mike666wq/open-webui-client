@@ -207,7 +207,7 @@ jobs:
           apk="${apks[0]}"
           apkanalyzer manifest application-id "$apk" | grep -Fx 'local.openwebui.client'
           apkanalyzer manifest version-code "$apk" | grep -Fx "$ANDROID_SMOKE_VERSION_CODE"
-          apksigner verify "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
           unzip -l "$apk" | grep -q 'lib/x86_64/'
           mkdir -p "$RUNNER_TEMP/android-diagnostic-apk"
           cp "$apk" "$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk"
