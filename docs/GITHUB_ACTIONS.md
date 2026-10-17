@@ -53,3 +53,11 @@
 `prepare-lockfile` 仅确认 `package-lock.json` 和 `src-tauri/Cargo.lock` 存在，并将当前 checkout SHA 固定给后续 jobs；它不会更新锁文件、运行 formatter 或提交代码。Android manifest、明文网络配置和 Gradle release 签名配置在 CI 生成工程后由 `scripts/prepare-android.mjs` 幂等准备；源码中的 debug versionCode 保持 `2`。签名 release job 才在生成 Gradle 项目中覆盖 `defaultConfig.versionCode`，并且会验证 APK 签名证书与固定 keystore 的 SHA-256 指纹一致、package ID、minSdk、ARM64 ABI 与 versionCode。
 
 旧 `codex/stage-1`、`codex/stage-2-connection-settings`、`codex/stage-3-downloads` 和 `codex/stage-4-signing-delivery` 分支仅在 main push 的质量检查成功后清理。job 在删除前要求 main 仍是该 push 的 SHA，并逐项确认指定 branch head 是该 SHA 的 ancestor；缺失的固定分支视为已清理，改变或未合入的分支会导致 job 安全失败。它不会枚举或删除其他分支。
+
+
+## Android 构建后校验与测试源码
+
+- 图标校验使用 AAPT2 编译资源表定位各密度图标，兼容 release 的资源路径缩短；比较解码后的尺寸与 RGBA 像素，而不是 PNG 压缩字节。完全透明像素的不可见 RGB 会被归零。签名、包名、SDK 与 ARM64 校验仍保留。
+- candidate / release 调用可复用模拟器工作流时，显式传入的不可变 `source_sha` 与 `source_label` 优先于调用方继承的事件名；不能因为事件名是 `workflow_dispatch` 而回退到 v0.2.2。独立诊断仍可主动选择旧基线。
+- 指向 main 的 pull request 运行质量检查；同仓库分支的 pull request 还会调用固定源码 SHA 的模拟器诊断。独立诊断也可在修复分支手动选择 `current`，使用 runner 临时签名构建 x86_64 APK、检查编译图标并运行 API 29/36 模拟器；不读取正式签名密钥，也不发布 Release。
+- 安装依赖、测试与构建均在 GitHub Actions runner 上执行，本地只编辑文件。模拟器通过仍不代表 ARM64 真机验收完成。

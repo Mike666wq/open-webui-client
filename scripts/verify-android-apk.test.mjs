@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runValidationCommand, validateAndroidApkIconPayloads, validateAndroidApkIcons, validateAndroidApkMetadata, validateSigningFingerprint } from './verify-android-apk.mjs';
+import { PNG } from 'pngjs';
+import { androidIconPaths, runValidationCommand, validateAndroidApkIconPayloads, validateAndroidApkIcons, validateAndroidApkMetadata, validateSigningFingerprint } from './verify-android-apk.mjs';
 
 const badging = `package: name='local.openwebui.client' versionCode='1042' versionName='0.2.1'\nsdkVersion:'29'\ntargetSdkVersion:'36'`;
 const entries = 'AndroidManifest.xml\nlib/arm64-v8a/libapp.so\n';
@@ -61,25 +62,74 @@ test('built APK theme must reference Android 12 splash attributes by compiled ID
   ), /splash-screen/);
   assert.throws(() => validateAndroidApkIcons(resources, ''), /startup theme/);
 });
-test('packaged launcher PNG payloads must match every generated official density icon', () => {
+function iconFixture({ shortened = true } = {}) {
   const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
   const names = ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png'];
-  const entries = densities.flatMap((density) => names.map((name) => `res/mipmap-${density}-v4/${name}`)).join('\n');
-  const packaged = new Map(entries.split('\n').map((entry) => [entry, Buffer.from(`official:${entry}`)]));
-  const generated = new Map(densities.flatMap((density) => names.map((name) => [
-    `${density}/${name}`,
-    packaged.get(`res/mipmap-${density}-v4/${name}`),
-  ])));
-  assert.equal(validateAndroidApkIconPayloads(
-    entries,
-    (entry) => packaged.get(entry),
-    (density, name) => generated.get(`${density}/${name}`),
-  ), true);
-  const altered = new Map(packaged);
-  altered.set('res/mipmap-xhdpi-v4/ic_launcher_round.png', Buffer.from('different pixels'));
-  assert.throws(() => validateAndroidApkIconPayloads(
-    entries,
-    (entry) => altered.get(entry),
-    (density, name) => generated.get(`${density}/${name}`),
-  ), /does not match the generated official icon/);
+  const packaged = new Map();
+  const generated = new Map();
+  let resources = '';
+  for (const [nameIndex, name] of names.entries()) {
+    resources += `    resource 0x7f0d000${nameIndex} mipmap/${name.slice(0, -4)}\n`;
+    for (const [densityIndex, density] of densities.entries()) {
+      const archivePath = shortened ? `res/${nameIndex}${densityIndex}.png` : `res/mipmap-${density}-v4/${name}`;
+      resources += `      (${density}-v4) (file) ${archivePath} type=PNG\n`;
+      const data = Buffer.from([nameIndex, densityIndex, 90, 255, 40, 50, 60, 0]);
+      const image = { width: 2, height: 1, data };
+      generated.set(`${density}/${name}`, PNG.sync.write(image, { deflateLevel: 0 }));
+      // The package is recompressed and loses invisible RGB values.
+      packaged.set(archivePath, PNG.sync.write({ ...image, data: Buffer.from([
+        nameIndex, densityIndex, 90, 255, 0, 0, 0, 0,
+      ]) }, { deflateLevel: 9 }));
+    }
+  }
+  return { resources, packaged, generated, entries: [...packaged.keys()].join('\n') };
+}
+
+function validateFixture(fixture) {
+  return validateAndroidApkIconPayloads(
+    fixture.resources, fixture.entries,
+    (entry) => fixture.packaged.get(entry),
+    (density, name) => fixture.generated.get(`${density}/${name}`),
+  );
+}
+
+test('launcher pixels survive shortened resource paths, PNG recompression and invisible RGB changes', () => {
+  for (const shortened of [true, false]) {
+    const fixture = iconFixture({ shortened });
+    assert.equal(androidIconPaths(fixture.resources).size, 15);
+    assert.notDeepEqual(fixture.packaged.values().next().value, fixture.generated.values().next().value);
+    assert.equal(validateFixture(fixture), true);
+  }
+});
+
+test('APK resource table must map each icon density to exactly one existing archive entry', () => {
+  let fixture = iconFixture();
+  fixture.resources = fixture.resources.replace('mdpi-v4', 'anydpi-v26');
+  assert.throws(() => validateFixture(fixture), /exactly one mdpi/);
+  fixture = iconFixture();
+  fixture.resources = fixture.resources.replace('(mdpi-v4)', '(mdpi-v4) (file) res/extra.png type=PNG\n      (mdpi-v5)');
+  assert.throws(() => validateFixture(fixture), /multiple mdpi/);
+  fixture = iconFixture();
+  fixture.entries = fixture.entries.split('\n').slice(1).join('\n');
+  assert.throws(() => validateFixture(fixture), /exactly one mdpi/);
+  fixture = iconFixture();
+  fixture.entries += '\nres/00.png';
+  assert.throws(() => validateFixture(fixture), /exactly one mdpi/);
+  fixture = iconFixture();
+  fixture.resources = fixture.resources.replace('res/00.png', 'res/../other.png');
+  assert.throws(() => validateFixture(fixture), /invalid mdpi/);
+});
+
+test('changed pixels, dimensions or malformed PNGs still reject the packaged official icon', () => {
+  for (const changed of [
+    PNG.sync.write({ width: 2, height: 1, data: Buffer.from([255, 0, 90, 255, 0, 0, 0, 0]) }),
+    PNG.sync.write({ width: 1, height: 2, data: Buffer.from([0, 0, 90, 255, 0, 0, 0, 0]) }),
+  ]) {
+    const fixture = iconFixture();
+    fixture.packaged.set('res/00.png', changed);
+    assert.throws(() => validateFixture(fixture), /does not match the generated official icon/);
+  }
+  const fixture = iconFixture();
+  fixture.packaged.set('res/00.png', Buffer.from('not a PNG'));
+  assert.throws(() => validateFixture(fixture), /Could not decode packaged mdpi/);
 });

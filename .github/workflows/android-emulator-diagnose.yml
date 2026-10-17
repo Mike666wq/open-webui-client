@@ -58,7 +58,7 @@ env:
 
 jobs:
   choose-source:
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name != 'push' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-22.04
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
@@ -80,40 +80,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
-            selected="$ANDROID_SMOKE_PINNED_SOURCE_SHA"
-            if [[ ! "$selected" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "workflow_call requires a 40-character immutable commit SHA." >&2
-              exit 1
-            fi
-            if [[ ! "$ANDROID_SMOKE_SOURCE_LABEL" =~ ^[a-z0-9-]{1,40}$ ]]; then
-              echo "workflow_call source label is invalid." >&2
-              exit 1
-            fi
-            echo "source_sha=$selected" >> "$GITHUB_OUTPUT"
-            echo "source_kind=$ANDROID_SMOKE_SOURCE_LABEL" >> "$GITHUB_OUTPUT"
-            exit 0
-          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+          changed_json='[]'
+          if [ -z "$ANDROID_SMOKE_PINNED_SOURCE_SHA" ] && [ -z "$ANDROID_SMOKE_SOURCE_LABEL" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             if [ -z "$ANDROID_SMOKE_BEFORE" ] || [[ "$ANDROID_SMOKE_BEFORE" =~ ^0+$ ]]; then
               echo "Push event has no usable before SHA; refusing to guess the app source." >&2
               exit 1
             fi
             changed_json="$(git diff --name-only "$ANDROID_SMOKE_BEFORE" "$ANDROID_SMOKE_SHA" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split(/\r?\n/).filter(Boolean))))')"
-          else
-            changed_json='[]'
           fi
-          selected="$(ANDROID_SMOKE_CHANGED_PATHS="$changed_json" ANDROID_SMOKE_SOURCE="$ANDROID_SMOKE_REQUESTED_SOURCE" node scripts/select-android-smoke-source.mjs | sed -n 's/^source=//p')"
-          if [ "$selected" = "current" ]; then
-            echo "source_sha=$ANDROID_SMOKE_SHA" >> "$GITHUB_OUTPUT"
-            echo "source_kind=current" >> "$GITHUB_OUTPUT"
-          elif [ "$selected" = "$ANDROID_SMOKE_BASELINE_SHA" ]; then
-            echo "source_sha=$ANDROID_SMOKE_BASELINE_SHA" >> "$GITHUB_OUTPUT"
-            echo "source_kind=v0.2.2-baseline" >> "$GITHUB_OUTPUT"
-          else
-            echo "Unexpected selected source: $selected" >&2
-            exit 1
-          fi
-          echo "Selected $selected for event $GITHUB_EVENT_NAME; workflow checkout remains $ANDROID_SMOKE_SHA."
+          ANDROID_SMOKE_CHANGED_PATHS="$changed_json" node scripts/select-android-smoke-source.mjs >> "$GITHUB_OUTPUT"
 
   build-x86_64-test-apk:
     needs: choose-source
@@ -237,6 +212,12 @@ jobs:
             echo "- Signing key: temporary, generated for this runner job and not retained"
             echo "- APK: test-only artifact; not a release asset"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify compiled official icon resources on the selected current source
+        if: ${{ needs.choose-source.outputs.source_kind != 'v0.2.2-baseline' }}
+        working-directory: app-source
+        shell: bash
+        run: |
+          node scripts/verify-android-apk.mjs "$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk" --icons-only
       - uses: actions/upload-artifact@v4
         with:
           name: android-emulator-diagnostic-apk-${{ github.run_id }}
