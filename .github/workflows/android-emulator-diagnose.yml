@@ -11,6 +11,7 @@ on:
       - 'scripts/download-bridge.js'
       - 'scripts/link-bridge.js'
       - 'scripts/prepare-assets.mjs'
+      - 'scripts/generate-android-bridges.mjs'
       - 'scripts/android-icons.mjs'
       - 'public/**'
       - 'src/**'
@@ -176,6 +177,14 @@ jobs:
         run: |
           node scripts/prepare-android.mjs
           npm run tauri -- android build --apk --target x86_64
+      - name: Preserve bundled local interface for CI inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-local-interface-${{ github.run_id }}
+          path: app-source/dist/
+          retention-days: 1
+          if-no-files-found: ignore
       - name: Run Android connection-controls unit tests
         working-directory: app-source/src-tauri/gen/android
         shell: bash
@@ -253,6 +262,8 @@ jobs:
           set -euo pipefail
           test -x "$ANDROID_HOME/emulator/emulator"
           echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+      - name: Install screenshot text recognition for DocumentsUI geometry fallback
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr imagemagick
       - name: Install x86_64 Google APIs image
         run: sdkmanager "system-images;android-${{ matrix.api }};google_apis;x86_64"
       - uses: actions/download-artifact@v4
@@ -386,6 +397,11 @@ jobs:
             echo "- API level: $ANDROID_SMOKE_API"
             echo "- The script records the idle baseline and supplementary interaction result separately."
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify Android native chrome and real connection interactions
+        if: ${{ needs.choose-source.outputs.source_kind != 'v0.2.2-baseline' }}
+        shell: bash
+        run: |
+          python scripts/android-native-experience.py --output "$RUNNER_TEMP/android-emulator-evidence/native-ui"
       - name: Upload filtered diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4

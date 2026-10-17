@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateServiceUrl, classifyNavigation } from './trust.js';
+import { androidStrings } from './android-strings.js';
 import { transition } from './connection-state.js';
 
 const service = validateServiceUrl('https://chat.example.org:8443');
@@ -45,4 +46,13 @@ test('connection settings expose connecting and failure retry transitions', () =
   assert.equal(transition('connecting', { type: 'failed' }), 'failed');
   assert.equal(transition('failed', { type: 'connect' }), 'connecting');
   assert.equal(transition('connected', { type: 'failed' }), 'connected');
+});
+
+
+test('Android local strings follow Chinese locales without changing desktop defaults', () => {
+  assert.equal(androidStrings(false, 'zh-CN'), null);
+  assert.equal(androidStrings(true, 'en-US'), null);
+  assert.equal(androidStrings(true, 'fr-FR'), null);
+  assert.equal(androidStrings(true, 'zh-TW').connect, '连接');
+  assert.equal(androidStrings(true, 'ZH-cn').failure, '连接失败，请检查地址和网络后重试。');
 });

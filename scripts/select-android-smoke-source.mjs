@@ -11,7 +11,7 @@ const behaviorPaths = [
   /^vite\.config\.js$/,
   /^client\.config\.json$/,
   /^src-tauri\//,
-  /^scripts\/(?:prepare-android|generate-client-config|prepare-assets|android-icons|download-bridge|link-bridge)\.(?:mjs|js)$/,
+  /^scripts\/(?:prepare-android|generate-client-config|generate-android-bridges|prepare-assets|android-icons|download-bridge|link-bridge)\.(?:mjs|js)$/,
 ];
 
 export function selectAndroidSmokeSource({ eventName, requestedSource = 'baseline', changedPaths = [] }) {

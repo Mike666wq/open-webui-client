@@ -34,7 +34,17 @@ export function updateManifest(source) {
   if (!result.includes('android:networkSecurityConfig="@xml/network_security_config"')) {
     throw new Error('AndroidManifest.xml already uses an unexpected network security configuration');
   }
-  return result;
+  // The native Insets owner handles edge-to-edge and IME overlap consistently.
+  const activities = [...result.matchAll(/<activity\b[^>]*>/g)];
+  const main = activities.find(([tag]) => /android:name\s*=\s*["'][^"']*MainActivity["']/.test(tag));
+  if (!main) throw new Error('AndroidManifest.xml has no generated MainActivity');
+  const tag = main[0];
+  const updated = /android:windowSoftInputMode\s*=/.test(tag)
+    ? tag.replace(/android:windowSoftInputMode\s*=\s*(["'])[^"']*\1/, 'android:windowSoftInputMode="adjustResize"')
+    : tag;
+  const adjusted = /android:windowSoftInputMode\s*=/.test(tag) ? updated
+    : tag.replace(/\s*\/?>$/, (ending) => ` android:windowSoftInputMode="adjustResize"${ending}`);
+  return result.replace(tag, adjusted);
 }
 
 function parseReleaseVersionCode(value) {

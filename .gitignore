@@ -11,3 +11,5 @@ src-tauri/gen/android/tauri.properties
 Thumbs.db
 __pycache__/
 *.py[cod]
+
+src-tauri/android-scripts/

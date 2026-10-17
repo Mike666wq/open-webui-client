@@ -175,7 +175,14 @@
       produce: async (write) => {
         for (let offset = 0; offset < blob.size; offset += CHUNK_BYTES) {
           const part = blob.slice(offset, Math.min(offset + CHUNK_BYTES, blob.size));
-          await write(new Uint8Array(await part.arrayBuffer()));
+          const bytes = typeof part.arrayBuffer === 'function' ? await part.arrayBuffer()
+            : await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = () => reject(new Error('Could not read the file chunk.'));
+              reader.readAsArrayBuffer(part);
+            });
+          await write(new Uint8Array(bytes));
         }
       },
     });

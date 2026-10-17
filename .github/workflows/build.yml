@@ -66,6 +66,13 @@ jobs:
           cache: npm
       - name: Install frontend dependencies
         run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
+      - name: Verify SAVE recognition against the captured API29 regression screenshot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr imagemagick
+          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
       - name: Run Node tests
         run: npm test
       - name: Check synchronized app version
@@ -94,8 +101,18 @@ jobs:
           components: rustfmt
       - name: Check Rust formatting
         run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml -- --check
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
+          git diff --binary > "$RUNNER_TEMP/rustfmt.patch"
+          git diff --exit-code
+      - name: Upload runner-generated formatting suggestions
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-${{ github.job }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/rustfmt.patch
+          if-no-files-found: ignore
+          retention-days: 1
 
   pull-request-android-smoke:
     needs: [prepare-lockfile, quality]
@@ -231,6 +248,13 @@ jobs:
           cache: npm
       - name: Install frontend dependencies
         run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
+      - name: Verify SAVE recognition against the captured API29 regression screenshot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr imagemagick
+          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
       - name: Run Node tests
         run: npm test
       - name: Check synchronized app version
@@ -258,8 +282,18 @@ jobs:
           components: rustfmt
       - name: Check Rust formatting
         run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml -- --check
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
+          git diff --binary > "$RUNNER_TEMP/rustfmt.patch"
+          git diff --exit-code
+      - name: Upload runner-generated formatting suggestions
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-${{ github.job }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/rustfmt.patch
+          if-no-files-found: ignore
+          retention-days: 1
 
   candidate-quality:
     needs: [prepare-lockfile, validate-android-signing]
@@ -275,6 +309,13 @@ jobs:
           cache: npm
       - name: Install frontend dependencies
         run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
+      - name: Verify SAVE recognition against the captured API29 regression screenshot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr imagemagick
+          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
       - name: Run Node tests
         run: npm test
       - name: Check synchronized app version
@@ -285,8 +326,18 @@ jobs:
           components: rustfmt
       - name: Check Rust formatting
         run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml -- --check
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
+          git diff --binary > "$RUNNER_TEMP/rustfmt.patch"
+          git diff --exit-code
+      - name: Upload runner-generated formatting suggestions
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-${{ github.job }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/rustfmt.patch
+          if-no-files-found: ignore
+          retention-days: 1
 
   release-emulator-smoke:
     needs: [prepare-release, release-quality]

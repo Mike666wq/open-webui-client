@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { networkSecurityConfigXml, updateGradle, updateManifest } from './prepare-android.mjs';
 
 test('manifest installs the network policy and preserves existing attributes', () => {
-  const input = '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Client"></application></manifest>';
+  const input = '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Client"><activity android:name=".MainActivity" /></application></manifest>';
   const once = updateManifest(input);
   assert.match(once, /android:label="Client"/);
   assert.match(once, /android:networkSecurityConfig="@xml\/network_security_config"/);
@@ -51,4 +51,13 @@ test('Gradle release signing reads secrets from environment and stays idempotent
   assert.throws(() => updateGradle(release, 1043), /unexpected Android defaultConfig versionCode/);
   assert.throws(() => updateGradle(once, 1000), /between 1001 and 2100000000/);
   assert.throws(() => updateGradle(once, 2_100_000_001), /between 1001 and 2100000000/);
+});
+
+
+test('Android manifest pins resize and preserves unrelated activity attributes idempotently', () => {
+  const source = '<manifest><application><activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustPan" /></application></manifest>';
+  const result = updateManifest(source);
+  assert.match(result, /android:windowSoftInputMode="adjustResize"/);
+  assert.match(result, /android:exported="true"/);
+  assert.equal(updateManifest(result), result);
 });

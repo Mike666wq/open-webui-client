@@ -71,6 +71,9 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     private var settingsUri: Uri? = null
     private var backCallback: OnBackPressedCallback? = null
     private var webView: WebView? = null
+    private var clientUi: AndroidClientUi? = null
+    private var nativeActions: app.tauri.plugin.Channel? = null
+    private var nativeState: ClientStateArgs? = null
 
     private val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -101,6 +104,37 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         }
         settingsUri = uri
         invoke.resolve()
+    }
+
+    @Command
+    fun installNativeActions(invoke: Invoke) {
+        val actions = invoke.parseArgs(NativeActionsArgs::class.java).actions
+        activity.runOnUiThread {
+            nativeActions = actions
+            clientUi?.install(actions)
+            invoke.resolve()
+        }
+    }
+
+    @Command
+    fun renderConnectionState(invoke: Invoke) {
+        val state = invoke.parseArgs(ClientStateArgs::class.java)
+        activity.runOnUiThread {
+            nativeState = state
+            clientUi?.render(state)
+            invoke.resolve()
+        }
+    }
+
+    @Command
+    fun showNativeNotice(invoke: Invoke) {
+        val code = invoke.parseArgs(NativeNoticeArgs::class.java).code
+        activity.runOnUiThread { clientUi?.notice(code); invoke.resolve() }
+    }
+
+    override fun onResume(activity: AppCompatActivity) {
+        super.onResume(activity)
+        clientUi?.resume()
     }
 
     @Command
@@ -442,20 +476,12 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
             val owner = activity as? AppCompatActivity ?: return@post
             if (owner.isFinishing || owner.isDestroyed) return@post
 
+            val ui = AndroidClientUi(activity, webView)
+            clientUi = ui
+            nativeActions?.let(ui::install)
+            nativeState?.let(ui::render)
             val callback = object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    val currentUri = webView.url?.let(Uri::parse)
-                    val localSettingsUri = settingsUri
-                    if (currentUri != null && localSettingsUri != null &&
-                        currentUri.scheme == localSettingsUri.scheme &&
-                        currentUri.host == localSettingsUri.host &&
-                        currentUri.port == localSettingsUri.port
-                    ) {
-                        activity.finish()
-                    } else {
-                        webView.loadUrl(localSettingsUri?.toString() ?: return)
-                    }
-                }
+                override fun handleOnBackPressed() { ui.back() }
             }
             backCallback = callback
             owner.onBackPressedDispatcher.addCallback(owner, callback)
@@ -466,6 +492,10 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         recordLifecycle(LifecycleMarker.ACTIVITY_DESTROYED)
         backCallback?.remove()
         backCallback = null
+        clientUi?.destroy()
+        clientUi = null
+        nativeActions = null
+        nativeState = null
         webView = null
         var pendingInvoke: Invoke? = null
         val abandoned = synchronized(lock) {

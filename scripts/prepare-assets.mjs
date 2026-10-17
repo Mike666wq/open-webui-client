@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { generateClientConfig } from './generate-client-config.mjs';
+import { generateAndroidBridges } from './generate-android-bridges.mjs';
 import { ensureAndroidIconResources } from './android-icons.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,6 +17,7 @@ if (actualHash !== sourceHash) {
 }
 
 await generateClientConfig();
+await generateAndroidBridges(root);
 const tauriBin = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tauri.cmd' : 'tauri');
 const result = spawnSync(tauriBin, ['icon', 'public/app-icon.png'], {
   cwd: root,

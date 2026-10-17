@@ -76,3 +76,29 @@
 ## 当前未实现
 
 后台通知、自动更新、macOS 公证、Apple Developer ID 正式签名、Windows 商业签名和商店发布尚未实现，也不属于当前验收通过项。
+
+
+## Android native experience (post-v0.2.4)
+
+GitHub API 29/36 gates use synthetic runner-local services, not a user's Open WebUI data.
+They must prove that native settings cancellation keeps the document/draft, the native-only
+plugin denies page calls, switches use the existing handshake and success persistence,
+failed switches retain the previous successful service, and Back never revisits another
+server. Evidence includes portrait, landscape, IME, failure and SAF screenshots.
+
+Top status bars are hidden by default and transiently shown by edge swipe without relayout;
+the bottom system navigation and camera cutout stay reserved. The draggable native menu
+has a 48dp target. IME adjustment must not apply its height twice or overwrite the saved
+menu fraction. Native actions are serialized; stale generations/revisions are rejected.
+Chinese Android locales use Chinese client labels; other locales fall back to English.
+
+A green emulator gate does not claim HyperOS physical-device UX acceptance. Release can
+proceed after the GitHub gates, as requested, with that limitation stated in release notes.
+
+
+The synthetic test service reports its own current DOM bounds/draft/scroll nonce to the
+runner because stock WebView accessibility may omit virtual children after navigation.
+Native controls still use real UIAutomator nodes and all interaction uses actual ADB
+taps/keys. Fixture reports are accepted only while a visible WebView is present and the
+report is fresh; raw hierarchy, fixture state and screenshots remain separate evidence.
+No production debug API or script injection into a user's service is added.
