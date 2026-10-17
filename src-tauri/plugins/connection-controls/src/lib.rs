@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_os = "android"))]
+use std::marker::PhantomData;
+#[cfg(target_os = "android")]
+use tauri::plugin::PluginHandle;
 use tauri::{
     Runtime,
     plugin::{Builder, TauriPlugin},
 };
-#[cfg(target_os = "android")]
-use tauri::plugin::PluginHandle;
-#[cfg(not(target_os = "android"))]
-use std::marker::PhantomData;
 
 #[cfg(target_os = "android")]
 const ANDROID_PLUGIN_IDENTIFIER: &str = "local.openwebui.connectioncontrols";
