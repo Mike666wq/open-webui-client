@@ -103,7 +103,7 @@ function readCargoLockPackageVersion(contents) {
   return version;
 }
 
-function validateVersionFiles(contentsByPath) {
+export function validateVersionContents(contentsByPath) {
   const packageJson = parseJsonFile(contentsByPath.get('package.json'), 'package.json');
   const packageLock = parseJsonFile(contentsByPath.get('package-lock.json'), 'package-lock.json');
   const tauriConfig = parseJsonFile(contentsByPath.get(path.join('src-tauri', 'tauri.conf.json')), 'src-tauri/tauri.conf.json');
@@ -179,18 +179,18 @@ function updateVersionFiles(contentsByPath, version) {
   updated.set(cargoLockPath, cargoLock.replace(appPackagePattern, `$1${version}$2`));
 
   // Validate all candidate contents before any filesystem writes occur.
-  if (validateVersionFiles(updated) !== version) throw new Error('Updated app version files failed validation');
+  if (validateVersionContents(updated) !== version) throw new Error('Updated app version files failed validation');
   return updated;
 }
 
 export async function checkVersions(root = projectRoot) {
   const contents = await readVersionFiles(root);
-  return validateVersionFiles(contents);
+  return validateVersionContents(contents);
 }
 
 export async function bumpVersions(target, root = projectRoot) {
   const contents = await readVersionFiles(root);
-  const current = validateVersionFiles(contents);
+  const current = validateVersionContents(contents);
   const next = bumpedVersion(current, target);
   if (compareVersions(next, current) <= 0) {
     throw new Error(`New version ${next} must be greater than ${current}`);

@@ -4,7 +4,7 @@ Open WebUI Client 是一个用 Tauri 2 打包的轻量客户端。它直接连�
 
 首版交付目标为 Windows 10/11 x64 NSIS 安装程序（包含离线 WebView2 Runtime）、macOS 12 及以上 Apple Silicon ad-hoc DMG，以及 Android 10 及以上 ARM64 release APK（固定 keystore 签名）。macOS 包没有 Developer ID 签名或公证。
 
-GitHub Actions 负责构建并保存 artifacts，不自动发布 GitHub Release。CI 成功表示 runner 完成了构建，不代表已在真实设备完成安装、连接或交互验收。请查看[实施阶段](docs/IMPLEMENTATION_STAGES.md)、[验收清单](docs/ACCEPTANCE.md)和[Actions 构建说明](docs/GITHUB_ACTIONS.md)。
+GitHub Actions 在 `main` 上执行质量检查；手动发版时先自动递增 patch 版本并提交到 `main`，再以同一源码 SHA 构建三端。只有三个平台全部成功后才创建 tag、上传安装包和 SHA-256 校验文件，并公开 GitHub Release。CI 成功仍不代表真实设备验收通过。请查看[实施阶段](docs/IMPLEMENTATION_STAGES.md)、[验收清单](docs/ACCEPTANCE.md)和[Actions 构建说明](docs/GITHUB_ACTIONS.md)。
 
 ## 连接服务
 
@@ -28,8 +28,8 @@ Android 系统返回键在服务页面时回到本地连接设置页，在设置
 
 ## 构建
 
-构建在 GitHub Actions 的 **Build desktop and Android packages** 中运行。手动触发默认选择 `desktop`，无需 Android 签名 secrets；只有在 `main` 手动选择 `android` 或 `all` 才会运行签名 APK job。推送和 PR 只构建 Android debug 检查，不上传 debug APK。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 首次打开可能需要对该应用单独使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。产物保留为 Actions artifacts，由维护者手动下载、审核和分发，不自动发布。
+在 GitHub Actions 的 **Build desktop and Android packages** 页面选择 `main` 并手动运行即可发版；没有平台参数。workflow 先验证 Android 签名密钥，再将 patch 版本递增并提交 `main`，然后让质量检查、Windows NSIS、macOS ARM64 DMG 和 Android ARM64 签名 APK 都 checkout 到该提交。Android versionCode 固定按 `1000 + github.run_number` 生成。只有全部 jobs 成功后，workflow 才创建版本 tag 并公开含三端安装包及 `SHA256SUMS` 的 GitHub Release。main push 只运行 Node/version、JDK keystore smoke、Rust formatting 质量检查和已合入旧 stage 分支的受限清理，不自动发版。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 首次打开可能需要对该应用单独使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。
 
-首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。随后按[构建与签名说明](docs/GITHUB_ACTIONS.md)将 keystore Base64、固定别名和相同密码加入另外三个 secrets。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 keystore 时 workflow 会拒绝重生成。
+首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。用 Windows PowerShell 将备份 keystore 编码到剪贴板，然后只需再设置 `ANDROID_KEYSTORE_BASE64` secret。固定别名是 `openwebui-client`，key password 复用 `ANDROID_KEYSTORE_PASSWORD`，不需要另外两个冗余 secret。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 Base64 keystore 时 workflow 会拒绝重生成。
 
-首次使用前，需先将功能 PR 合并到默认分支 `main`；合并前的分支推送和 PR 用于 CI 验证。随后从 `main` 的 Actions 页面手动选择目标。签名密钥和正式版本的操作详见[构建与签名说明](docs/GITHUB_ACTIONS.md)。
+密钥初始化和签名发布步骤详见[构建与签名说明](docs/GITHUB_ACTIONS.md)。

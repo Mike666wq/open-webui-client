@@ -26,11 +26,13 @@ Android 允许应用连接任意明文 HTTP 服务，因此网络安全配置的
 
 ## 阶段四：签名 APK 与交付说明
 
-阶段四增加 Android 固定 keystore 的一次性初始化流程和 main 分支手动签名构建。初始化 workflow 生成 RSA 3072 位、密码保护的 PKCS#12；APK 只在 `main` 上通过手动 `workflow_dispatch` 并选择 `android` 或 `all` 时签名。release `versionCode` 为 `1000 + github.run_number`，相同 run 重试保持相同值，新 run 递增；源码/debug 保持 `2`。语义版本需通过版本管理脚本同步递增。
+阶段四增加固定 Android keystore、main 手动发布、自动 patch bump 和 GitHub Release 编排。维护者首次在仓库中设置 `ANDROID_KEYSTORE_PASSWORD`，从 main 运行初始化 workflow 并安全备份密码保护的 RSA 3072 位 PKCS#12，再将该文件的 Base64 设置为 `ANDROID_KEYSTORE_BASE64`。alias 固定为 `openwebui-client`，key password 复用 store password。已有 keystore 时拒绝重生成。
 
-初始化 artifact 是 Actions 仓库中的临时文件，不是私密存储；下载后应立即私下备份并删除 artifact 和初始化 run。Actions artifacts 供维护者手动审核和分发，不会自动创建 GitHub Release、公开发布或启用自动更新。用户首次配置、生成和导入 secrets 的步骤见[构建与签名说明](GITHUB_ACTIONS.md)。
+正式发布只接受 main 上无参数的手动 dispatch。workflow 在版本 bump 前验证两项签名 secrets 和实际 PKCS#12/alias；通过后由 GitHub Actions `GITHUB_TOKEN` non-force 地将 patch bump 提交到 main，随后 quality 与 Windows x64、macOS ARM64、Android ARM64 全部 checkout 同一 SHA。Android release `versionCode` 为 `1000 + github.run_number`；源码/debug 保持 `2`。仅三端构建全部成功后，workflow 才创建 tag、上传三个安装包和 `SHA256SUMS` 并公开 Release。构建失败会保留版本 bump commit，但不会公开 Release；同一 run 重试复用原 pinned 版本。没有 PAT、自动更新、商店发布或桌面正式签名。
 
-阶段四源码已通过 GitHub Actions push run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source 与 downstream output SHA 均为 `9effd627031d985395e650bf17933a38e8e56dcd`。Quality job 中 Node tests 20/20、版本一致性检查、JDK 25 临时 PKCS#12 生成 smoke test 和 Rust 格式检查通过；Windows x64 NSIS、macOS ARM64 ad-hoc DMG（Rust library tests 12/12）及 Android ARM64 debug 检查均通过。该 push 正确跳过了仅限 `main` 手动 dispatch 的签名 release job，因此尚未验证签名 APK 的实际生成。Windows、macOS、Android 安装启动、连接以及 Android SAF 保存的实机验收仍未完成，不应将 CI 结果表述为设备验收通过。
+初始化 artifact 只保留一天且不是私密存储，下载并安全备份后需立即删除 artifact 和初始化 run。手动 secret 配置与发布步骤见[构建与签名说明](GITHUB_ACTIONS.md)。main push 只运行 Node/version、JDK 25 临时 keystore smoke、Rust 格式质量检查及已合入旧 stage branch 的受限清理，不启动原生构建。
+
+阶段四原始构建基线已通过 GitHub Actions run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source/output SHA 均为 `9effd627031d985395e650bf17933a38e8e56dcd`；当时 Node tests 20/20、版本一致性、JDK 25 临时 PKCS#12 生成 smoke test、Rust 格式检查、Windows NSIS、macOS ARM64 ad-hoc DMG/Rust tests 12/12 和 Android debug 构建通过。后续 main-only Release orchestration、两项 secret 校验和 APK metadata/signature 验证属于新改动，必须等其 GitHub Actions 验证后才能标记通过。签名 release APK 和 Windows/macOS/Android 安装、连接、Android SAF 保存的实机验收目前仍未完成。
 
 ## 后续阶段
 
