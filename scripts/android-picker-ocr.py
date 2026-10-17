@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 
 def locate_save(source, evidence):
@@ -48,6 +49,7 @@ def locate_save(source, evidence):
         tsv = subprocess.check_output(['tesseract', str(crop), 'stdout', '--psm', '7', 'tsv'], text=True, timeout=30)
         (evidence / f'save-candidate-{index}.tsv').write_text(tsv, encoding='utf-8')
         words = [row for row in csv.DictReader(io.StringIO(tsv), delimiter='\t') if row['text'].strip()]
+        print(json.dumps({'bounds': [left, top, w, h], 'words': [{'text': row['text'], 'confidence': row['conf']} for row in words]}), file=sys.stderr)
         if len(words) == 1 and words[0]['text'].strip().upper() == 'SAVE' and float(words[0]['conf']) >= 80:
             matches.append({'x': left+w//2, 'y': top+h//2, 'bounds': [left, top, left+w, top+h]})
     assert len(matches) == 1, 'UNVERIFIED: visible SAVE button is not unique/confident'
