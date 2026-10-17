@@ -252,6 +252,9 @@ try:
     ) or bool(re.search(r'(?:requestedVisibleTypes|Requested visible types|mRequestedVisibleTypes).*navigationBars(?![^\n]*statusBars)', app_dump, re.I))
     requested_masks = re.findall(r'mRequestedVisibleTypes=(0x[0-9a-fA-F]+|[0-9]+)\b', app_dump)
     hidden = hidden or any(int(value, 16 if value.startswith('0x') else 10) & 1 == 0 for value in requested_masks)
+    # Android 16 dumps the XOR against default-visible bars instead of a mask.
+    non_default = re.findall(r'Requested non-default-visibility types:\s*([^\n]*)', app_dump)
+    hidden = hidden or any(value.strip() == 'statusBars' for value in non_default)
     assert hidden, 'UNVERIFIED: unable to prove the app requests hidden status bars'
     screenshot('connected-portrait')
 
