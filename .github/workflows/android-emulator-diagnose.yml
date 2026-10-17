@@ -287,6 +287,7 @@ jobs:
             if [ -f "$RUNNER_TEMP/emulator.log" ]; then
               tail -300 "$RUNNER_TEMP/emulator.log" > "$evidence/emulator-startup.log" || true
             fi
+            timeout 10s avdmanager list avd > "$evidence/avd-list.txt" 2>&1 || true
             timeout 10s adb devices -l > "$evidence/adb-devices.txt" 2>&1 || true
             timeout 10s adb logcat -b crash -d -t 500 > "$evidence/emulator-crash-logcat.txt" 2>&1 || true
             echo "Boot diagnostics saved to the always-uploaded evidence artifact." >&2
@@ -315,11 +316,20 @@ jobs:
           }
           trap on_exit EXIT
 
+          avd_home="$RUNNER_TEMP/android-avd"
+          mkdir -p "$avd_home"
+          export ANDROID_AVD_HOME="$avd_home"
+          echo "ANDROID_AVD_HOME=$avd_home" >> "$GITHUB_ENV"
           printf 'no\n' | timeout --signal=TERM --kill-after=5s 120s avdmanager create avd --force \
             --name "diagnose-api-${{ matrix.api }}" \
             --package "system-images;android-${{ matrix.api }};google_apis;x86_64" --device pixel_2
+          avd_name="diagnose-api-${{ matrix.api }}"
+          test -s "$ANDROID_AVD_HOME/$avd_name.ini"
+          test -d "$ANDROID_AVD_HOME/$avd_name.avd"
+          timeout 10s avdmanager list avd > "$evidence/avd-list.txt"
+          grep -F "Name: $avd_name" "$evidence/avd-list.txt"
           timeout --signal=TERM --kill-after=5s 30s emulator -accel-check
-          nohup emulator -avd "diagnose-api-${{ matrix.api }}" -no-window -no-audio -no-boot-anim \
+          nohup emulator -avd "$avd_name" -no-window -no-audio -no-boot-anim \
             -gpu swiftshader_indirect -accel on > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
           echo "$emulator_pid" > "$RUNNER_TEMP/emulator.pid"
