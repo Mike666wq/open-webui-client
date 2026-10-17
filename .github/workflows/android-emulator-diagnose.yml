@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 name: Android emulator startup diagnosis
 
 on:
@@ -196,14 +197,26 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
       - name: Prepare and build release-profile x86_64 diagnostic APK
+        id: android-apk-build
         working-directory: app-source
         run: |
           node scripts/prepare-android.mjs
           npm run tauri -- android build --apk --target x86_64
       - name: Run Android connection-controls unit tests
         working-directory: app-source/src-tauri/gen/android
-        run: ./gradlew :connection-controls:testDebugUnitTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          projects="$(./gradlew projects --console=plain)"
+          printf '%s\n' "$projects"
+          mapfile -t plugin_projects < <(printf '%s\n' "$projects" | sed -nE "s/.*Project '(:[^']*connection[-_]controls[^']*)'.*/\1/p" | sort -u)
+          if [ "${#plugin_projects[@]}" -ne 1 ]; then
+            echo "Expected one generated Gradle project for connection-controls; matching paths were: ${plugin_projects[*]:-(none)}" >&2
+            exit 1
+          fi
+          ./gradlew "${plugin_projects[0]}:testDebugUnitTest" --console=plain
       - name: Verify and collect only the diagnostic APK
+        if: always() && steps.android-apk-build.outcome == 'success'
         working-directory: app-source
         shell: bash
         run: |
@@ -418,3 +431,4 @@ jobs:
               kill -KILL "$emulator_pid" 2>/dev/null || true
             fi
           fi
+

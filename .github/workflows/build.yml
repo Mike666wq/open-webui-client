@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 name: Build desktop and Android packages
 
 on:
@@ -578,9 +579,26 @@ jobs:
       - name: Run Android connection-controls unit tests
         id: android-plugin-tests
         working-directory: src-tauri/gen/android
-        run: ./gradlew :connection-controls:testDebugUnitTest
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-signing/release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: openwebui-client
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          projects="$(./gradlew projects --console=plain)"
+          printf '%s\n' "$projects"
+          mapfile -t plugin_projects < <(printf '%s\n' "$projects" | sed -nE "s/.*Project '(:[^']*connection[-_]controls[^']*)'.*/\1/p" | sort -u)
+          if [ "${#plugin_projects[@]}" -ne 1 ]; then
+            echo "Expected one generated Gradle project for connection-controls; matching paths were: ${plugin_projects[*]:-(none)}" >&2
+            exit 1
+          fi
+          ./gradlew "${plugin_projects[0]}:testDebugUnitTest" --console=plain
       - name: Verify signature and Android package metadata
         id: verify-release-apk
+        if: always() && steps.release-apk-staged.outcome == 'success'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         shell: bash
@@ -725,9 +743,26 @@ jobs:
       - name: Run Android connection-controls unit tests
         id: android-plugin-tests
         working-directory: src-tauri/gen/android
-        run: ./gradlew :connection-controls:testDebugUnitTest
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-signing/release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: openwebui-client
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_VERSION_CODE: ${{ steps.android-version.outputs.version_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          projects="$(./gradlew projects --console=plain)"
+          printf '%s\n' "$projects"
+          mapfile -t plugin_projects < <(printf '%s\n' "$projects" | sed -nE "s/.*Project '(:[^']*connection[-_]controls[^']*)'.*/\1/p" | sort -u)
+          if [ "${#plugin_projects[@]}" -ne 1 ]; then
+            echo "Expected one generated Gradle project for connection-controls; matching paths were: ${plugin_projects[*]:-(none)}" >&2
+            exit 1
+          fi
+          ./gradlew "${plugin_projects[0]}:testDebugUnitTest" --console=plain
       - name: Verify signature, official icons and Android metadata
         id: verify-candidate-apk
+        if: always() && steps.candidate-metadata.outcome == 'success'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         shell: bash
@@ -799,3 +834,4 @@ jobs:
           RELEASE_ANDROID_RESULT: ${{ needs.android.result }}
           RELEASE_ARTIFACT_DIR: release-inputs
         run: node scripts/release-orchestrator.mjs publish
+
