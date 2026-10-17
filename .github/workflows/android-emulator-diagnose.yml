@@ -251,6 +251,12 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools emulator
+      - name: Add Android emulator binary to PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$ANDROID_HOME/emulator/emulator"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
       - name: Install x86_64 Google APIs image
         run: sdkmanager "system-images;android-${{ matrix.api }};google_apis;x86_64"
       - uses: actions/download-artifact@v4
