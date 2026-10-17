@@ -19,6 +19,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
@@ -280,7 +281,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         layout.addView(address); layout.addView(status); layout.addView(previous)
         val dialog = AlertDialog.Builder(activity)
             .setTitle(tr("Connection settings", "连接设置"))
-            .setView(layout)
+            .setView(ScrollView(activity).apply { addView(layout) })
             .setNegativeButton(tr("Cancel", "取消")) { _, _ -> cancelIfConnecting() }
             .setPositiveButton(tr("Connect", "连接"), null)
             .create()

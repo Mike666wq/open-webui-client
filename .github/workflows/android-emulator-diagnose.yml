@@ -11,6 +11,7 @@ on:
       - 'scripts/download-bridge.js'
       - 'scripts/link-bridge.js'
       - 'scripts/prepare-assets.mjs'
+      - 'scripts/generate-android-bridges.mjs'
       - 'scripts/android-icons.mjs'
       - 'public/**'
       - 'src/**'

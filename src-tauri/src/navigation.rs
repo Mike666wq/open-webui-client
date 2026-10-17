@@ -8,7 +8,13 @@ use tauri_plugin_opener::OpenerExt;
 use crate::connection::{self, parse_external_url};
 
 pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
+    #[cfg(target_os = "android")]
+    let download_bridge = include_str!("../android-scripts/download-bridge.js");
+    #[cfg(not(target_os = "android"))]
     let download_bridge = include_str!("../../scripts/download-bridge.js");
+    #[cfg(target_os = "android")]
+    let link_bridge = include_str!("../android-scripts/link-bridge.js");
+    #[cfg(not(target_os = "android"))]
     let link_bridge = include_str!("../../scripts/link-bridge.js");
     let init_script =
         format!("if (window.top === window.self) {{\n{download_bridge}\n{link_bridge}\n}}");

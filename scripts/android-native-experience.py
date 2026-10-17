@@ -185,11 +185,11 @@ try:
     # Both API families expose the app's requested system UI policy in dumpsys.
     app_blocks = [part for part in re.split(r'Window #\d+', dump) if PACKAGE in part]
     app_dump = '\n'.join(app_blocks)
-    hidden = 'FULLSCREEN' in app_dump or any(
+    hidden = bool(re.search(r'\bFULLSCREEN\b', app_dump)) or any(
         int(value, 16) & 4 for value in re.findall(r'(?:mSystemUiVisibility|sysui)=(?:0x)?([0-9a-fA-F]+)', app_dump)
     ) or bool(re.search(r'(?:requestedVisibleTypes|Requested visible types|mRequestedVisibleTypes).*navigationBars(?![^\n]*statusBars)', app_dump, re.I))
     requested_masks = re.findall(r'mRequestedVisibleTypes=(0x[0-9a-fA-F]+|[0-9]+)\b', app_dump)
-    hidden = hidden or any(int(value, 0) & 1 == 0 for value in requested_masks)
+    hidden = hidden or any(int(value, 16 if value.startswith('0x') else 10) & 1 == 0 for value in requested_masks)
     assert hidden, 'UNVERIFIED: unable to prove the app requests hidden status bars'
     screenshot('connected-portrait')
 
@@ -233,6 +233,21 @@ try:
     assert not any(PACKAGE in line for line in focused.splitlines() if 'ResumedActivity' in line), 'Root Back did not background app'
     shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
     find('Fixture header 8765')
+
+    # Exercise a real emulated cutout, not a hard-coded top padding assumption.
+    overlay_list = shell('cmd overlay list')
+    available = re.findall(r'com\.android\.internal\.display\.cutout\.emulation\.[a-z]+', overlay_list)
+    cutout_overlay = next((item for item in available if item.endswith('.tall')), None)
+    if cutout_overlay is None:
+        cutout_overlay = next((item for item in available if item.endswith('.corner')), None)
+    assert cutout_overlay, 'UNVERIFIED: no cutout emulation overlay available'
+    shell(f'cmd overlay enable {cutout_overlay}')
+    time.sleep(3)
+    find('Client menu')
+    assert bounds(find('Fixture header 8765'))[1] > 0, 'Header entered emulated cutout'
+    screenshot('display-cutout')
+    shell(f'cmd overlay disable {cutout_overlay}')
+    time.sleep(3)
 
     # Rotate without introducing remote CSS or destroying the client chrome.
     shell('settings put system accelerometer_rotation 0')
@@ -291,5 +306,7 @@ finally:
     for server in SERVERS:
         server.shutdown()
     shell('settings put system user_rotation 0', check=False)
+    if 'cutout_overlay' in globals() and cutout_overlay:
+        shell(f'cmd overlay disable {cutout_overlay}', check=False)
     for port in (8765, 8766, 8767):
         adb('reverse', '--remove', f'tcp:{port}', check=False)
