@@ -1,10 +1,12 @@
 package local.openwebui.connectioncontrols
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
 import android.provider.DocumentsContract
 import android.util.Base64
 import android.util.Log
@@ -19,6 +21,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.File
 import java.io.OutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -28,6 +31,7 @@ private const val MAX_TRANSFER_BYTES = 2L * 1024 * 1024 * 1024
 private const val MAX_BASE64_CHARS = ((MAX_CHUNK_BYTES + 2) / 3) * 4
 private const val PICKER_EXPIRY_MS = 10 * 60 * 1000L
 private const val LOG_TAG = "ConnectionControls"
+private const val DIAGNOSTICS_FILE = "android-diagnostics.txt"
 
 @InvokeArg
 internal class ConfigureArgs {
@@ -70,6 +74,9 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
 
     private val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val lifecycleRing by lazy {
+        LifecycleRing(File(activity.noBackupFilesDir, "android-lifecycle.log"))
+    }
     private val ioExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "connection-controls-save-io").apply { isDaemon = true }
     }
@@ -78,6 +85,10 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     private var pendingPickerTransferId: String? = null
     private var pendingPickerInvoke: Invoke? = null
     private var pendingPickerTimeout: Runnable? = null
+    private var pendingDiagnosticsInvoke: Invoke? = null
+    private var pendingDiagnosticsReport: String? = null
+    private var pendingDiagnosticsTimeout: Runnable? = null
+    private var pendingDiagnosticsExpired = false
     private var destroyed = false
 
     @Command
@@ -106,7 +117,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         }
 
         val canStart = synchronized(lock) {
-            if (destroyed || pendingPickerTransferId != null || transfers.containsKey(args.transferId)) {
+            if (destroyed || pendingPickerTransferId != null || pendingDiagnosticsInvoke != null || transfers.containsKey(args.transferId)) {
                 false
             } else {
                 cancelledTransfers.remove(args.transferId)
@@ -127,6 +138,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         }
         try {
             startActivityForResult(invoke, intent, "onSaveDocument")
+            recordLifecycle(LifecycleMarker.SAVE_PICKER_OPENED)
             schedulePickerExpiry(args.transferId)
         } catch (error: Exception) {
             Log.e(LOG_TAG, "Could not open the Android save picker", error)
@@ -142,6 +154,98 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
             }
             timeout?.let(mainHandler::removeCallbacks)
             invoke.reject("Could not open the Android save picker")
+        }
+    }
+
+    @Command
+    fun exportDiagnostics(invoke: Invoke) {
+        val canStart = synchronized(lock) {
+            if (destroyed || pendingPickerTransferId != null || pendingDiagnosticsInvoke != null || transfers.isNotEmpty()) {
+                false
+            } else {
+                pendingDiagnosticsInvoke = invoke
+                true
+            }
+        }
+        if (!canStart) {
+            invoke.reject("Finish or cancel the current document operation before exporting diagnostics")
+            return
+        }
+
+        val report = try {
+            diagnosticsReport()
+        } catch (error: Exception) {
+            Log.e(LOG_TAG, "Could not collect local Android diagnostics", error)
+            synchronized(lock) { pendingDiagnosticsInvoke = null }
+            invoke.reject("Could not prepare Android diagnostics")
+            return
+        }
+        synchronized(lock) { pendingDiagnosticsReport = report }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, DIAGNOSTICS_FILE)
+        }
+        try {
+            startActivityForResult(invoke, intent, "onDiagnosticsDocument")
+            scheduleDiagnosticsExpiry()
+        } catch (error: Exception) {
+            Log.e(LOG_TAG, "Could not open the Android diagnostics picker", error)
+            synchronized(lock) {
+                pendingDiagnosticsInvoke = null
+                pendingDiagnosticsReport = null
+                pendingDiagnosticsExpired = false
+                pendingDiagnosticsTimeout?.let(mainHandler::removeCallbacks)
+                pendingDiagnosticsTimeout = null
+            }
+            invoke.reject("Could not open the Android diagnostics picker")
+        }
+    }
+
+    @ActivityCallback
+    fun onDiagnosticsDocument(invoke: Invoke, result: ActivityResult) {
+        val report: String?
+        val ownerInvoke: Invoke?
+        val expired: Boolean
+        synchronized(lock) {
+            pendingDiagnosticsTimeout?.let(mainHandler::removeCallbacks)
+            pendingDiagnosticsTimeout = null
+            report = pendingDiagnosticsReport
+            pendingDiagnosticsReport = null
+            ownerInvoke = pendingDiagnosticsInvoke
+            pendingDiagnosticsInvoke = null
+            expired = pendingDiagnosticsExpired
+            pendingDiagnosticsExpired = false
+        }
+        val uri = result.data?.data
+        if (expired) {
+            if (result.resultCode == Activity.RESULT_OK && uri != null) {
+                runCatching { DocumentsContract.deleteDocument(activity.contentResolver, uri) }
+            }
+            return
+        }
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            ownerInvoke?.resolve(diagnosticsReply("cancelled"))
+            return
+        }
+        if (report == null) {
+            ownerInvoke?.reject("Android diagnostics export expired")
+            return
+        }
+        executeIo {
+            try {
+                val bytes = report.toByteArray(Charsets.UTF_8)
+                if (bytes.size > AndroidDiagnosticsReport.MAX_REPORT_BYTES) {
+                    throw IllegalStateException("Diagnostics report exceeds its size limit")
+                }
+                val output = activity.contentResolver.openOutputStream(uri, "w")
+                    ?: throw IllegalStateException("Selected document could not be opened")
+                output.use { it.write(bytes) }
+                ownerInvoke?.resolve(diagnosticsReply("exported"))
+            } catch (error: Exception) {
+                Log.e(LOG_TAG, "Could not write Android diagnostics", error)
+                ownerInvoke?.reject("Could not write Android diagnostics")
+            }
         }
     }
 
@@ -272,6 +376,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
                 }
                 transfer.output.flush()
                 transfer.output.close()
+                recordLifecycle(LifecycleMarker.SAVE_FINISHED)
                 invoke.resolve()
             } catch (error: Exception) {
                 Log.e(LOG_TAG, "Could not finish document", error)
@@ -328,6 +433,8 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
 
     override fun load(webView: WebView) {
         this.webView = webView
+        recordLifecycle(LifecycleMarker.APP_STARTED)
+        recordLifecycle(LifecycleMarker.WEBVIEW_READY)
 
         // Tauri's built-in AppPlugin installs its dispatcher callback during plugin setup.
         // Posting here makes this app-specific callback the later, higher-priority callback.
@@ -356,6 +463,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     }
 
     override fun onDestroy(activity: AppCompatActivity) {
+        recordLifecycle(LifecycleMarker.ACTIVITY_DESTROYED)
         backCallback?.remove()
         backCallback = null
         webView = null
@@ -367,6 +475,12 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
             pendingPickerInvoke = null
             pendingPickerTimeout?.let(mainHandler::removeCallbacks)
             pendingPickerTimeout = null
+            pendingDiagnosticsInvoke?.resolve(diagnosticsReply("cancelled"))
+            pendingDiagnosticsInvoke = null
+            pendingDiagnosticsReport = null
+            pendingDiagnosticsExpired = false
+            pendingDiagnosticsTimeout?.let(mainHandler::removeCallbacks)
+            pendingDiagnosticsTimeout = null
             transfers.values.toList().also { transfers.clear() }
         }
         pendingInvoke?.resolve(beginReply("cancelled"))
@@ -387,6 +501,60 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     private fun beginReply(status: String, transferId: String? = null): JSObject = JSObject().apply {
         put("status", status)
         if (transferId != null) put("transferId", transferId)
+    }
+
+    private fun diagnosticsReply(status: String): JSObject = JSObject().apply { put("status", status) }
+
+    private fun scheduleDiagnosticsExpiry() {
+        val timeout = Runnable {
+            val pending = synchronized(lock) {
+                pendingDiagnosticsReport = null
+                pendingDiagnosticsTimeout = null
+                pendingDiagnosticsExpired = pendingDiagnosticsInvoke != null
+                pendingDiagnosticsInvoke
+            }
+            pending?.resolve(diagnosticsReply("cancelled"))
+        }
+        synchronized(lock) { pendingDiagnosticsTimeout = timeout }
+        mainHandler.postDelayed(timeout, PICKER_EXPIRY_MS)
+    }
+
+    private fun recordLifecycle(marker: LifecycleMarker) {
+        if (Build.VERSION.SDK_INT != 29) return
+        executeIo {
+            runCatching {
+                lifecycleRing.append(LifecycleRecord(System.currentTimeMillis(), marker))
+            }.onFailure { Log.w(LOG_TAG, "Could not record a local lifecycle marker") }
+        }
+    }
+
+    private fun diagnosticsReport(): String {
+        val exits = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val manager = activity.getSystemService(ActivityManager::class.java)
+            manager.getHistoricalProcessExitReasons(activity.packageName, 0, AndroidDiagnosticsReport.MAX_EXIT_RECORDS)
+                .take(AndroidDiagnosticsReport.MAX_EXIT_RECORDS)
+                .map { info ->
+                    ExitRecord(
+                        reason = AndroidDiagnosticsReport.reasonName(info.reason),
+                        status = info.status,
+                        importance = info.importance,
+                        timestampMillis = info.timestamp,
+                        pssKb = info.pss,
+                        rssKb = info.rss,
+                    )
+                }
+        } else null
+        val lifecycle = if (exits == null) {
+            lifecycleRing.read()
+        } else emptyList()
+        val version = activity.packageManager.getPackageInfo(activity.packageName, 0).versionName.orEmpty()
+        return AndroidDiagnosticsReport.format(
+            appVersion = version,
+            sdk = Build.VERSION.SDK_INT,
+            generatedAtMillis = System.currentTimeMillis(),
+            exits = exits,
+            lifecycle = lifecycle,
+        )
     }
 
     private fun schedulePickerExpiry(transferId: String) {

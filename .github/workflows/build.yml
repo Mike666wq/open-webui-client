@@ -322,10 +322,21 @@ jobs:
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Build NSIS installer
         run: npm run tauri -- build --bundles nsis
-      - name: Collect installer
+      - name: Stage NSIS installer before icon validation
+        id: windows-installer-staged
         shell: pwsh
         run: |
           $version = node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version"
+          $files = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis/*.exe' -File
+          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $artifact = "Open-WebUI-Client-$version-windows-x64-setup.exe"
+          Copy-Item $files[0].FullName "artifacts/$artifact"
+          "artifact=$artifact" >> $env:GITHUB_OUTPUT
+      - name: Verify Windows executable icons
+        id: verify-windows-icons
+        shell: pwsh
+        run: |
           git diff --exit-code -- src-tauri/Cargo.lock
           $files = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis/*.exe' -File
           if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
@@ -366,12 +377,27 @@ jobs:
           Assert-EmbeddedIconMatches 'src-tauri/target/release/open-webui-client.exe' $icoPath
           Assert-EmbeddedIconMatches $files[0].FullName $icoPath
           Write-Host 'Desktop application and NSIS installer icons match the official ICO.'
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item $files[0].FullName "artifacts/Open-WebUI-Client-$version-windows-x64-setup.exe"
+      - name: Report Windows package validation
+        if: always() && steps.windows-installer-staged.outcome == 'success'
+        shell: pwsh
+        run: |
+          if ('${{ steps.verify-windows-icons.outcome }}' -eq 'success') {
+            Add-Content $env:GITHUB_STEP_SUMMARY 'The NSIS installer passed icon validation; it remains internal until every release gate succeeds.'
+          } else {
+            Add-Content $env:GITHUB_STEP_SUMMARY 'The installer is retained as an internal UNVERIFIED artifact after post-build validation failed. It cannot enter a Release.'
+          }
       - uses: actions/upload-artifact@v4
+        if: steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome == 'success'
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64
           path: artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome != 'success'
+        with:
+          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
+          retention-days: 3
           if-no-files-found: error
 
   macos:
@@ -409,12 +435,24 @@ jobs:
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Build ad-hoc DMG
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles dmg
-      - name: Run Rust library unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --release --locked --target aarch64-apple-darwin
-      - name: Collect DMG
+      - name: Stage DMG before post-build checks
+        id: macos-dmg-staged
         shell: bash
         run: |
+          set -euo pipefail
           version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          shopt -s nullglob
+          files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          test "${#files[@]}" -eq 1 || { echo "Expected one DMG, found ${#files[@]}" >&2; exit 1; }
+          mkdir -p artifacts
+          cp "${files[0]}" "artifacts/Open-WebUI-Client-${version}-macos-${{ matrix.arch }}.dmg"
+      - name: Run Rust library unit tests
+        id: rust-library-tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --release --locked --target aarch64-apple-darwin
+      - name: Verify packaged DMG icon
+        id: verify-macos-icon
+        shell: bash
+        run: |
           git diff --exit-code -- src-tauri/Cargo.lock
           shopt -s nullglob
           files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
@@ -439,12 +477,27 @@ jobs:
           test "$dimensions" = ok
           cmp "$packaged_icon" src-tauri/icons/icon.icns
           echo 'Mounted DMG app icon matches the official ICNS byte-for-byte.'
-          mkdir -p artifacts
-          cp "$dmg" "artifacts/Open-WebUI-Client-${version}-macos-${{ matrix.arch }}.dmg"
+      - name: Report macOS package validation
+        if: always() && steps.macos-dmg-staged.outcome == 'success'
+        shell: bash
+        run: |
+          if [ "${{ steps.rust-library-tests.outcome }}" = "success" ] && [ "${{ steps.verify-macos-icon.outcome }}" = "success" ]; then
+            echo 'The DMG passed Rust tests and packaged-icon validation; it remains internal until every release gate succeeds.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'The DMG is retained as an internal UNVERIFIED artifact after a post-build check failed. It cannot enter a Release.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@v4
+        if: steps.macos-dmg-staged.outcome == 'success' && steps.rust-library-tests.outcome == 'success' && steps.verify-macos-icon.outcome == 'success'
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}
           path: artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.macos-dmg-staged.outcome == 'success' && (steps.rust-library-tests.outcome != 'success' || steps.verify-macos-icon.outcome != 'success')
+        with:
+          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
+          retention-days: 3
           if-no-files-found: error
 
   android:
@@ -490,6 +543,9 @@ jobs:
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Initialize Android project
         run: npm run tauri -- android init --ci
+      - name: Run Android connection-controls unit tests
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -509,7 +565,21 @@ jobs:
           ANDROID_KEY_ALIAS: openwebui-client
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: npm run tauri -- android build --apk --target aarch64
+      - name: Stage signed APK for internal inspection
+        id: release-apk-staged
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          shopt -s nullglob
+          files=(src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk)
+          test "${#files[@]}" -eq 1 || { echo "Expected one ARM64 release APK, found ${#files[@]}" >&2; exit 1; }
+          mkdir -p artifacts
+          artifact="Open-WebUI-Client-${version}-android-arm64-vc${ANDROID_VERSION_CODE}.apk"
+          cp "${files[0]}" "artifacts/${artifact}"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
       - name: Verify signature and Android package metadata
+        id: verify-release-apk
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         shell: bash
@@ -520,29 +590,31 @@ jobs:
           test "${#files[@]}" -eq 1 || { echo "Expected one ARM64 release APK, found ${#files[@]}" >&2; exit 1; }
           node scripts/verify-android-apk.mjs "${files[0]}" "$ANDROID_VERSION_CODE"
           git diff --exit-code -- src-tauri/Cargo.lock
-      - name: Collect signed APK
+      - name: Report Android release package validation
+        if: always() && steps.release-apk-staged.outcome == 'success'
         shell: bash
         run: |
-          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
-          shopt -s nullglob
-          files=(src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk)
-          mkdir -p artifacts
-          artifact="Open-WebUI-Client-${version}-android-arm64-vc${ANDROID_VERSION_CODE}.apk"
-          cp "${files[0]}" "artifacts/${artifact}"
-          {
-            echo "## Signed Android release artifact"
-            echo "- App version: ${version}"
-            echo "- Android versionCode: ${ANDROID_VERSION_CODE}"
-            echo "- Artifact: ${artifact}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.verify-release-apk.outcome }}" = "success" ]; then
+            echo "The signed APK passed package verification. It remains internal until all release gates succeed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The signed APK was retained as an internal UNVERIFIED artifact after package verification failed. It cannot enter a Release." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@v4
+        if: steps.release-apk-staged.outcome == 'success' && steps.verify-release-apk.outcome == 'success'
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-vc${{ needs.prepare-release.outputs.version_code }}
           path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.release-apk-staged.outcome == 'success' && steps.verify-release-apk.outcome != 'success'
+        with:
+          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
+          retention-days: 3
+          if-no-files-found: error
 
   android-candidate:
-    needs: [prepare-lockfile, validate-android-signing, candidate-quality, candidate-emulator-smoke]
+    needs: [prepare-lockfile, validate-android-signing, candidate-quality]
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'candidate' && needs.validate-android-signing.outputs.validated == 'true' }}
     runs-on: ubuntu-22.04
     env:
@@ -595,6 +667,9 @@ jobs:
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Initialize Android project
         run: npm run tauri -- android init --ci
+      - name: Run Android connection-controls unit tests
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Decode the existing release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -615,7 +690,42 @@ jobs:
           ANDROID_KEY_ALIAS: openwebui-client
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: npm run tauri -- android build --apk --target aarch64
+      - name: Stage candidate APK before post-build validation
+        id: candidate-metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*release*')
+          test "${#apks[@]}" -eq 1 || { echo "Expected one ARM64 candidate APK, found ${#apks[@]}" >&2; exit 1; }
+          mkdir -p artifacts
+          artifact="Open-WebUI-Client-${version}-candidate-android-arm64-vc${ANDROID_VERSION_CODE}-run${GITHUB_RUN_NUMBER}.apk"
+          cp "${apks[0]}" "artifacts/${artifact}"
+          cat > artifacts/README.txt <<EOF
+          UNVERIFIED TEST CANDIDATE
+
+          App version: ${version}
+          Android versionCode: ${ANDROID_VERSION_CODE}
+          Source SHA: ${{ needs.prepare-lockfile.outputs.source_sha }}
+          Package: local.openwebui.client (ARM64)
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          API 29 evidence artifact: android-emulator-evidence-api-29-${GITHUB_RUN_ID}
+          API 36 evidence artifact: android-emulator-evidence-api-36-${GITHUB_RUN_ID}
+
+          This is a test-only signed APK, not a Release. Check the Android package-verification step before installing it.
+          Emulator status is separate. Inspect candidate-emulator-smoke and its API 29 and API 36 evidence artifacts; this file does not assert that smoke testing passed.
+          EOF
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Signed Android candidate staged"
+            echo "- App version: ${version} (source unchanged; no version bump, tag or Release)"
+            echo "- Android versionCode: ${ANDROID_VERSION_CODE} (1000 + workflow run number)"
+            echo "- Artifact: ${artifact} (UNVERIFIED test candidate)"
+            echo "- Source: ${{ needs.prepare-lockfile.outputs.source_sha }}"
+            echo "- Package checks and API 29/36 emulator smoke are separate gates; see their steps and evidence artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify signature, official icons and Android metadata
+        id: verify-candidate-apk
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         shell: bash
@@ -625,29 +735,20 @@ jobs:
           test "${#apks[@]}" -eq 1 || { echo "Expected one ARM64 candidate APK, found ${#apks[@]}" >&2; exit 1; }
           node scripts/verify-android-apk.mjs "${apks[0]}" "$ANDROID_VERSION_CODE"
           git diff --exit-code -- src-tauri/Cargo.lock
-      - name: Collect signed candidate APK
-        id: candidate-metadata
+      - name: Report candidate package validation
+        if: always() && steps.candidate-metadata.outcome == 'success'
         shell: bash
         run: |
-          set -euo pipefail
-          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
-          mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*release*')
-          mkdir -p artifacts
-          artifact="Open-WebUI-Client-${version}-candidate-android-arm64-vc${ANDROID_VERSION_CODE}-run${GITHUB_RUN_NUMBER}.apk"
-          cp "${apks[0]}" "artifacts/${artifact}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Signed Android candidate"
-            echo "- App version: ${version} (source unchanged; no version bump, tag or Release)"
-            echo "- Android versionCode: ${ANDROID_VERSION_CODE} (1000 + workflow run number)"
-            echo "- Artifact: ${artifact}"
-            echo "- Source: ${{ needs.prepare-lockfile.outputs.source_sha }}"
-            echo "- Android API 29 and 36 emulator smoke gate: passed"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.verify-candidate-apk.outcome }}" = "success" ]; then
+            echo "The candidate passed signature, metadata and icon checks. It is still a test-only package; emulator status is reported separately." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The built APK is retained as an internal UNVERIFIED artifact after package validation failed. Do not install or distribute it." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@v4
+        if: always() && steps.candidate-metadata.outcome == 'success'
         with:
           name: Open-WebUI-Client-candidate-${{ steps.candidate-metadata.outputs.version }}-android-arm64-vc${{ steps.android-version.outputs.version_code }}-run${{ github.run_id }}
-          path: artifacts/Open-WebUI-Client-*-candidate-android-arm64-vc*-run*.apk
+          path: artifacts/
           retention-days: 3
           if-no-files-found: error
       - name: Remove temporary signing file

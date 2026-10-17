@@ -9,6 +9,7 @@ fn main() {
             "save-write-chunk",
             "save-finish",
             "save-cancel",
+            "export-android-diagnostics",
         ]));
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

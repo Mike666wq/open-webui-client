@@ -49,6 +49,12 @@ pub struct BeginSaveReply {
     pub transfer_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsExportReply {
+    pub status: String,
+}
+
 /// Android SAF bridge retained by the plugin and consumed by app-owned Rust commands.
 ///
 /// The native picker and document URI are never exposed to frontend JavaScript. On
@@ -136,6 +142,20 @@ impl<R: Runtime> ConnectionControlsBridge<R> {
         {
             let _ = args;
             Err("Android document saving is unavailable on this platform".into())
+        }
+    }
+
+    pub async fn export_diagnostics(&self) -> Result<DiagnosticsExportReply, String> {
+        #[cfg(target_os = "android")]
+        {
+            self.handle
+                .run_mobile_plugin_async("exportDiagnostics", ())
+                .await
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Err("Android diagnostics export is unavailable on this platform".into())
         }
     }
 }

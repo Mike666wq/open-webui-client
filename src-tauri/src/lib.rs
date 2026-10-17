@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod connection;
+mod diagnostics;
 mod navigation;
 mod save;
 
@@ -26,6 +27,7 @@ pub fn run() {
             save::save_write_chunk,
             save::save_finish,
             save::save_cancel,
+            diagnostics::export_android_diagnostics,
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

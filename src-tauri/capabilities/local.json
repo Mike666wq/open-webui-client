@@ -6,6 +6,7 @@
   "local": true,
   "permissions": [
     "allow-get-connection-state",
-    "allow-connect-service"
+    "allow-connect-service",
+    "allow-export-android-diagnostics"
   ]
 }

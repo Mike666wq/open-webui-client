@@ -41,4 +41,6 @@ input { width: 100%; min-width: 0; border: 1px solid #52657e; border-radius: 9px
 input:focus { outline: 2px solid #86efac; outline-offset: 2px; }
 button { justify-self: start; margin-top: 6px; border: 0; border-radius: 9px; padding: 11px 18px; color: #092217; background: #86efac; font: inherit; font-weight: 650; cursor: pointer; }
 button:disabled { cursor: wait; opacity: .6; }
+.secondary { display: block; margin: 20px auto 0; color: #d1d5db; background: #273449; font-size: 12px; }
+button[hidden] { display: none; }
 .error { color: #fca5a5; font-size: 13px; overflow-wrap: anywhere; }
