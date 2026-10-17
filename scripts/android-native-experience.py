@@ -38,7 +38,8 @@ def nodes(label='ui'):
         data = shell('cat /sdcard/native-ui.xml', check=False)
         try:
             root = ET.fromstring(data[data.index('<hierarchy'):])
-            (OUT / f'{COUNT:03}-{label}.xml').write_text(data, encoding='utf-8')
+            safe_label = re.sub(r'[^A-Za-z0-9_.-]', '-', label)
+            (OUT / f'{COUNT:03}-{safe_label}.xml').write_text(data, encoding='utf-8')
             return list(root.iter('node'))
         except (ValueError, ET.ParseError):
             time.sleep(1)
@@ -142,6 +143,8 @@ class Fixture(BaseHTTPRequestHandler):
 <button onclick="history.pushState({{}},'', '/next');document.querySelector('#route').textContent='Second route'">Next route</button><p id="route">First route</p>
 <button onclick="let a=document.createElement('a');a.download='fixture.txt';a.href=URL.createObjectURL(new Blob(['fixture-download']));a.click()">Download fixture</button>
 <button onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p>
+<output id="scroll-state" style="position:fixed;right:0;top:60px;font-size:10px">Scroll 0</output>
+<script>onpopstate=()=>document.querySelector('#route').textContent=location.pathname==='/next'?'Second route':'First route';onscroll=()=>document.querySelector('#scroll-state').textContent='Scroll '+Math.round(scrollY);</script>
 <main>Page nonce: {time.time_ns()}</main><footer>Fixture bottom</footer>'''.encode()
             kind = 'text/html; charset=utf-8'
         self.send_response(200)
@@ -161,9 +164,14 @@ for PORT in (8765, 8766, 8767):
 try:
     shell(f'pm clear {PACKAGE}')
     shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
-    time.sleep(4)
-    fields = [n for n in nodes() if n.get('class', '').endswith('EditText')]
-    assert fields, 'UNVERIFIED: local address field unavailable'
+    deadline = time.monotonic() + 30
+    fields = []
+    while time.monotonic() < deadline:
+        fields = [n for n in nodes('local-ready') if n.get('class', '').endswith('EditText') and n.get('text', '').startswith('http')]
+        if fields:
+            break
+        time.sleep(1)
+    assert fields, 'UNVERIFIED: local address field or client JavaScript initialization unavailable'
     enter(fields[0], 'http://127.0.0.1:8765')
     shell('input keyevent KEYCODE_BACK')
     tap('Connect')
@@ -186,11 +194,17 @@ try:
     screenshot('connected-portrait')
 
     tap('Probe native bridge'); find('Native bridge denied')
+    shell('input swipe 150 700 150 300 600'); time.sleep(1)
+    scroll_state = next(n.get('text') for n in nodes('scrolled') if n.get('text', '').startswith('Scroll '))
+    assert scroll_state != 'Scroll 0', 'UNVERIFIED: fixture did not scroll'
     field = settings()
     enter(field, 'http://127.0.0.1:8766')
     shell('input keyevent KEYCODE_BACK'); tap('CANCEL')
     after = nodes('after-cancel')
-    assert nonce in str(after) and 'draft-kept' in str(after), 'Opening/cancelling settings changed page state'
+    assert scroll_state in str(after), 'Opening/cancelling settings changed scroll position'
+    shell('input swipe 150 300 150 1000 600'); time.sleep(1)
+    restored = nodes('scroll-restored')
+    assert nonce in str(restored) and 'draft-kept' in str(restored), 'Opening/cancelling settings changed page state'
 
     # Native button drag persists across keyboard changes without reloading page.
     button = find('Client menu'); x1, y1, x2, y2 = bounds(button)
@@ -213,7 +227,7 @@ try:
 
     # Standard Back traverses only the current service, then backgrounds the app.
     tap('Next route'); find('Second route')
-    shell('input keyevent KEYCODE_BACK'); find('Fixture header 8765')
+    shell('input keyevent KEYCODE_BACK'); find('First route')
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
     focused = shell('dumpsys activity activities')
     assert not any(PACKAGE in line for line in focused.splitlines() if 'ResumedActivity' in line), 'Root Back did not background app'
@@ -235,6 +249,10 @@ try:
     tap('Reopen previous server')
     find('Fixture header 8766', timeout=40)
     settings(); tap('CANCEL')
+    shell(f'am force-stop {PACKAGE}')
+    shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
+    find('Fixture header 8766', timeout=40)
+    assert abs(bounds(find('Client menu'))[1] - drag_y) <= 6, 'Menu preference did not persist across restart'
 
     # Reload must warn; cancelling keeps the exact document nonce.
     nonce = next(n.get('text') for n in nodes() if 'Page nonce:' in n.get('text', ''))
@@ -263,6 +281,12 @@ try:
     window_evidence('final')
     (OUT / 'native-experience-result.txt').write_text('PASS: native menu, immersive request, fixture bridge denial, non-destructive settings, keyboard, drag, Back, rotation, switch, timeout recovery, reload and SAF diagnostic/download save and cancellation.\n', encoding='utf-8')
     print('ANDROID_NATIVE_EXPERIENCE_PASS')
+except Exception:
+    screenshot('failure')
+    window_evidence('failure')
+    nodes('failure')
+    (OUT / 'failure-logcat.txt').write_text(adb('logcat', '-d', '-t', '2000'), encoding='utf-8')
+    raise
 finally:
     for server in SERVERS:
         server.shutdown()

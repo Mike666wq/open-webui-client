@@ -82,15 +82,12 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     init {
         WindowCompat.setDecorFitsSystemWindows(activity.window, false)
         activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        // Reparent once, retaining Tauri's outer layout slot. All children receive
-        // one consistent content rectangle; the empty FrameLayout is not clickable.
+        // Never detach a loading WebView: doing so can interrupt its initial
+        // module/resource loading. Native chrome is a transparent sibling, and
+        // this controller adjusts the existing WebView's physical bounds.
         val parent = webView.parent as ViewGroup
-        val index = parent.indexOfChild(webView)
-        val params = webView.layoutParams
-        parent.removeView(webView)
-        parent.addView(root, index, params)
-        root.addView(webView, FrameLayout.LayoutParams(-1, -1))
-        root.setBackgroundColor(Color.rgb(20, 20, 20))
+        parent.addView(root, ViewGroup.LayoutParams(-1, -1))
+        root.setBackgroundColor(Color.TRANSPARENT)
         button.text = "⋮"
         button.textSize = 25f
         button.setTextColor(Color.WHITE)
@@ -145,6 +142,16 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         val bottom = max(cutout.bottom, overlap).coerceAtMost(root.height - top)
         if (root.paddingLeft != left || root.paddingTop != top || root.paddingRight != right || root.paddingBottom != bottom) {
             root.setPadding(left, top, right, bottom)
+        }
+        val params = webView.layoutParams
+        val width = (root.width - left - right).coerceAtLeast(1)
+        val height = (root.height - top - bottom).coerceAtLeast(1)
+        if (params is ViewGroup.MarginLayoutParams &&
+            (params.width != width || params.height != height || params.topMargin != top ||
+             params.leftMargin != left || params.rightMargin != right || params.bottomMargin != bottom)) {
+            params.width = width; params.height = height
+            params.leftMargin = left; params.topMargin = top; params.rightMargin = right; params.bottomMargin = bottom
+            webView.layoutParams = params
         }
         placeButton()
     }
@@ -345,5 +352,6 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         root.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
         ViewCompat.setOnApplyWindowInsetsListener(root, null)
         button.setOnTouchListener(null); button.setOnClickListener(null)
+        (root.parent as? ViewGroup)?.removeView(root)
     }
 }

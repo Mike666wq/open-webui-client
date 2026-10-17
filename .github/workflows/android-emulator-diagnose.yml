@@ -176,6 +176,14 @@ jobs:
         run: |
           node scripts/prepare-android.mjs
           npm run tauri -- android build --apk --target x86_64
+      - name: Preserve bundled local interface for CI inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-local-interface-${{ github.run_id }}
+          path: app-source/dist/
+          retention-days: 1
+          if-no-files-found: ignore
       - name: Run Android connection-controls unit tests
         working-directory: app-source/src-tauri/gen/android
         shell: bash
