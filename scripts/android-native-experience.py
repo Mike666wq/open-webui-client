@@ -311,7 +311,13 @@ try:
         assert 'mHasSurface=true' in ime_window and 'isVisible=true' in ime_window, 'IME window is not visible'
         content = re.search(r'mGivenContentInsets=\[0,(\d+)\]', ime_window)
         assert content and int(content[1]) > 0, 'UNVERIFIED: IME content geometry unavailable'
-        keyboard_top = int(content[1])
+        # Content insets are relative to the IME window, whose origin may
+        # be below a cutout. Convert to screen coordinates before comparing.
+        frame = re.search(r'mFrame=\[(-?\d+),(-?\d+)\]\[', ime_window)
+        if frame is None:
+            frame = re.search(r'\bframe=\[(-?\d+),(-?\d+)\]\[', ime_window)
+        assert frame, 'UNVERIFIED: IME frame origin unavailable'
+        keyboard_top = int(frame[2]) + int(content[1])
     # WebView virtual CSS bounds may round a device-pixel edge by <=3 pixels.
     assert bounds(draft)[3] <= keyboard_top + 3, 'Draft covered by keyboard'
     assert bounds(button)[3] <= keyboard_top + 3, 'Menu covered by keyboard'
