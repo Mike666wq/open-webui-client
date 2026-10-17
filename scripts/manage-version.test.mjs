@@ -56,7 +56,8 @@ test('stable version validation and Android release code bounds are strict', () 
 });
 
 test('check validates every app version location and fixed identifier', async () => {
-  assert.equal(await checkVersions(), '0.2.0');
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(await checkVersions(), packageJson.version);
   const { root } = await makeFixture();
   try {
     assert.equal(await checkVersions(root), '0.2.0');
@@ -88,6 +89,19 @@ test('bump updates only the app versions after validating all files', async () =
     assert.match(cargoLock, /name = "example"\nversion = "1\.2\.3"/);
     assert.match(cargoLock, /name = "tauri-plugin-connection-controls"\nversion = "0\.1\.0"/);
     assert.match(pluginCargo, /version = "0\.1\.0"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('patch bump advances the current main release baseline from 0.2.1 to 0.2.2', async () => {
+  const { root } = await makeFixture('0.2.1');
+  try {
+    assert.deepEqual(await bumpVersions('patch', root), { previous: '0.2.1', current: '0.2.2' });
+    assert.equal(await checkVersions(root), '0.2.2');
+    const packageLock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+    assert.equal(packageLock.version, '0.2.2');
+    assert.equal(packageLock.packages[''].version, '0.2.2');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
