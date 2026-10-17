@@ -6,7 +6,7 @@ Open WebUI Client 是一个用 Tauri 2 打包的轻量客户端。它直接连�
 
 GitHub Actions 在 `main` 上执行质量检查；手动发版时先自动递增 patch 版本并提交到 `main`，再以同一源码 SHA 构建三端。API 29/36 Android 模拟器检查与三个平台构建全部成功后，才创建 tag、上传安装包和 SHA-256 校验文件并公开 GitHub Release。请从[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)下载当前版本。CI 与下载校验通过仍不代表真实设备验收通过。请查看[实施阶段](docs/IMPLEMENTATION_STAGES.md)、[验收清单](docs/ACCEPTANCE.md)和[Actions 构建说明](docs/GITHUB_ACTIONS.md)。
 
-应用图标已统一为 Open WebUI 官方素材；Windows、macOS 与 Android 最终包图标验证仍待最新 CI 运行确认。已知 Redmi 设备有启动后约 10 秒内退出的报告，原因尚未确认，当前代码尚未标记为修复。
+应用图标已统一为 Open WebUI 官方素材；最终包图标验证以当前 CI 结果为准。Redmi K70 Pro / HyperOS 3 已报告启动后约 10 秒内退出，根因尚未确认，也未标记为修复。连接页另提供用户主动触发的 Android 诊断导出：API 30+ 仅列出本应用最近的有限退出原因和数值，API 29 只记录固定生命周期标记；报告由系统文件选择器保存，不自动发送，也不包含服务 URL、token、文件 URI 或异常文本。该代码仍需 GitHub 构建与设备验证。
 
 ## 连接服务
 
@@ -30,7 +30,7 @@ Android 系统返回键在服务页面时回到本地连接设置页，在设置
 
 ## 构建
 
-在 GitHub Actions 的 **Build desktop and Android packages** 页面选择 `main`，手动选择 `candidate` 或 `release`。`candidate` 不递增版本、不创建 tag 或 Release；它运行 API 29/36 模拟器检查，并提供三天后过期、由现有 Android keystore 签名的 ARM64 APK artifact，可在 Redmi 上覆盖安装现有固定签名版本。`release` 会自动递增 patch 并提交 `main`，之后质量检查、Windows NSIS、macOS ARM64 DMG 和 Android ARM64 签名 APK 都使用同一提交；Android versionCode 按 `1000 + github.run_number` 生成，只有所有门禁成功后才公开 Release。模拟器通过不能替代 Redmi 真机验收。main push 运行 Node/version、JDK keystore smoke、Rust formatting 质量检查和已合入旧 stage 分支的受限清理；触及 app 行为文件的 push 还会触发独立 Android emulator 诊断，不自动发版。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 首次打开可能需要对该应用单独使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。
+在 GitHub Actions 的 **Build desktop and Android packages** 页面选择 `main`，手动选择 `candidate` 或 `release`。`candidate` 不递增版本、不创建 tag 或 Release；它提供三天后过期、由现有 Android keystore 签名的 ARM64 APK Actions artifact，构建不等待 emulator 检查；检查结果在同一 run 单独报告。若 APK 后置验证失败，artifact 会标为 UNVERIFIED，只供内部排查，不应安装或分发。通过包验证后可在 Redmi 上覆盖安装现有固定签名版本。正式 Release 仍要求 API 29/36 emulator 与三端构建全部成功。`release` 会自动递增 patch 并提交 `main`，之后质量检查、Windows NSIS、macOS ARM64 DMG 和 Android ARM64 签名 APK 都使用同一提交；Android versionCode 按 `1000 + github.run_number` 生成，只有所有门禁成功后才公开 Release。模拟器通过不能替代 Redmi 真机验收；当前仍未完成 Redmi 启动稳定性验证。main push 运行 Node/version、JDK keystore smoke、Rust formatting 质量检查和已合入旧 stage 分支的受限清理；触及 app 行为文件的 push 还会触发独立 Android emulator 诊断，不自动发版。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 首次打开可能需要对该应用单独使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。
 
 首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。用 Windows PowerShell 将备份 keystore 编码到剪贴板，然后只需再设置 `ANDROID_KEYSTORE_BASE64` secret。固定别名是 `openwebui-client`，key password 复用 `ANDROID_KEYSTORE_PASSWORD`，不需要另外两个冗余 secret。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 Base64 keystore 时 workflow 会拒绝重生成。
 

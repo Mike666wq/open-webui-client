@@ -15,6 +15,7 @@ HEADING = "Connect to your server"
 TEST_ADDRESS = "http://192.0.2.1:3000"
 ACTIVE_PID = None
 CURRENT_OUTPUT = None
+API_LEVEL = None
 
 
 class SmokeFailure(RuntimeError):
@@ -38,11 +39,51 @@ def shell(command, *, check=True, timeout=30):
 
 def ui_dump(output_dir, label):
     remote = "/sdcard/window.xml"
-    shell(f"uiautomator dump {remote}", timeout=45)
-    xml = adb("exec-out", "cat", remote, timeout=30)
     xml_path = output_dir / f"{label}-hierarchy.xml"
-    xml_path.write_text(xml, encoding="utf-8")
-    return xml
+    diagnostics = []
+    for attempt in range(1, 4):
+        try:
+            shell(f"rm -f {remote}", check=False, timeout=10)
+            result = subprocess.run(
+                ["adb", "shell", "uiautomator", "dump", remote],
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+            diagnostics.extend((result.stdout or "").splitlines()[-4:])
+            diagnostics.extend((result.stderr or "").splitlines()[-4:])
+            read = subprocess.run(
+                ["adb", "exec-out", "cat", remote],
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            diagnostics.append(f"Attempt {attempt} failed: {type(error).__name__}")
+            time.sleep(1)
+            continue
+        candidate = read.stdout or ""
+        start = candidate.find("<hierarchy")
+        end = candidate.rfind("</hierarchy>")
+        if read.returncode == 0 and start >= 0 and end >= start:
+            candidate = candidate[start : end + len("</hierarchy>")]
+            try:
+                ET.fromstring(candidate)
+                xml_path.write_text(candidate, encoding="utf-8")
+                return candidate
+            except ET.ParseError as error:
+                diagnostics.append(f"XML parse failed: {error}")
+        else:
+            diagnostics.append(f"Hierarchy unavailable (cat exit {read.returncode})")
+        time.sleep(1)
+
+    (output_dir / f"{label}-accessibility.txt").write_text(
+        "UNVERIFIED: UIAutomator did not return a complete, parseable hierarchy after 3 attempts.\n"
+        + "\n".join(diagnostics[-20:])[:4000]
+        + "\n",
+        encoding="utf-8",
+    )
+    return None
 
 
 def capture_evidence(output_dir, label, pid):
@@ -51,10 +92,17 @@ def capture_evidence(output_dir, label, pid):
         (output_dir / f"{label}.png").write_bytes(screenshot.stdout)
     system_log = adb("logcat", "-b", "crash", "-d", "-v", "brief", check=False, timeout=30)
     (output_dir / f"{label}-crash.log").write_text("\n".join(system_log.splitlines()[-250:]), encoding="utf-8")
+    if pid:
+        app_log = adb(
+            "logcat", "-b", "main", "-d", "-v", "threadtime", "--pid", str(pid), "-t", "2000",
+            check=False, timeout=30,
+        )
+        app_lines = app_log.splitlines()[-400:]
+        (output_dir / f"{label}-app-main.log").write_text("\n".join(app_lines)[-200_000:], encoding="utf-8")
     last_anr = shell("dumpsys activity lastanr", check=False)
     if PACKAGE in last_anr:
         (output_dir / f"{label}-anr.txt").write_text("\n".join(last_anr.splitlines()[-120:]), encoding="utf-8")
-    if pid:
+    if pid and API_LEVEL is not None and API_LEVEL >= 30:
         exit_info = shell(f"dumpsys activity exit-info {PACKAGE}", check=False)
         if PACKAGE in exit_info:
             (output_dir / f"{label}-exit-info.txt").write_text("\n".join(exit_info.splitlines()[-120:]), encoding="utf-8")
@@ -89,9 +137,15 @@ def assert_running(pid, context):
 
 def assert_settings_visible(output_dir, label):
     xml = ui_dump(output_dir, label)
+    if xml is None:
+        return None
     root = ET.fromstring(xml)
     if HEADING not in xml and not any("WebView" in node.attrib.get("class", "") for node in root.iter("node")):
-        raise SmokeFailure(f"Neither settings text nor a WebView was exposed by UIAutomator during {label}")
+        (output_dir / f"{label}-accessibility.txt").write_text(
+            "UNVERIFIED: UIAutomator returned a hierarchy but exposed neither settings text nor a WebView.\n",
+            encoding="utf-8",
+        )
+        return None
     fields = [node for node in root.iter("node") if "service-address" in node.attrib.get("resource-id", "")]
     if not fields:
         # WebView versions can omit HTML IDs from the native accessibility tree.
@@ -112,7 +166,7 @@ def assert_settings_visible(output_dir, label):
     return fields[0].attrib.get("bounds", "")
 
 
-def launch_cold(output_dir, round_number):
+def launch_cold(output_dir, round_number, *, no_uia=False):
     global ACTIVE_PID
     ACTIVE_PID = None
     shell(f"am force-stop {PACKAGE}", check=False)
@@ -130,13 +184,15 @@ def launch_cold(output_dir, round_number):
         raise SmokeFailure(f"Cold launch {round_number} did not reach a foreground Activity")
     pid = int(pid.split()[0])
     ACTIVE_PID = pid
-    assert_settings_visible(output_dir, f"round-{round_number}-launch")
+    if not no_uia:
+        assert_settings_visible(output_dir, f"round-{round_number}-launch")
 
     # Observe the reported <10 second failure window six times over, checking PID and Activity each interval.
     for second in range(1, 7):
         time.sleep(10)
         assert_running(pid, f"idle observation {second}/6 in cold launch {round_number}")
-    assert_settings_visible(output_dir, f"round-{round_number}-after-60s")
+    if not no_uia:
+        assert_settings_visible(output_dir, f"round-{round_number}-after-60s")
     capture_evidence(output_dir, f"round-{round_number}", pid)
     return pid
 
@@ -157,11 +213,14 @@ def check_interactions(output_dir, pid):
         return False
     try:
         tap_address(bounds)
-    except ValueError:
+    except (ValueError, SmokeFailure):
+        # UI injection/accessibility may be unsupported. Preserve a real app exit
+        # as a failure, but report a healthy process with no usable controls as unverified.
+        assert_running(pid, "after unavailable address-field interaction")
         return False
     assert_running(pid, "typing a reserved documentation-only address without pressing Connect")
     xml = ui_dump(output_dir, "interaction-after-input")
-    if "192.0.2.1" not in xml:
+    if xml is None or "192.0.2.1" not in xml:
         return False
     capture_evidence(output_dir, "interaction-after-input", pid)
 
@@ -192,12 +251,13 @@ def check_interactions(output_dir, pid):
 
 
 def main():
-    global CURRENT_OUTPUT
+    global CURRENT_OUTPUT, API_LEVEL
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--api", required=True, type=int)
     parser.add_argument("--source-sha", required=True)
     args = parser.parse_args()
+    API_LEVEL = args.api
     output_dir = Path(args.output)
     CURRENT_OUTPUT = output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -211,7 +271,9 @@ def main():
     (output_dir / "device-metadata.txt").write_text("\n".join(f"{key}={value}" for key, value in metadata.items()), encoding="utf-8")
     shell(f"pm clear {PACKAGE}")
 
-    pids = [launch_cold(output_dir, round_number) for round_number in range(1, 4)]
+    # The first cold launch deliberately avoids UIAutomator before and during its
+    # idle window, so the reported startup signal cannot be caused by a hierarchy dump.
+    pids = [launch_cold(output_dir, round_number, no_uia=(round_number == 1)) for round_number in range(1, 4)]
     idle_pass = f"BASELINE_IDLE_PASS: API {args.api}, source {args.source_sha}, 3 cold starts x 60 seconds idle; same PID and foreground Activity at every 10-second checkpoint; no recorded ANR."
     print(idle_pass, flush=True)
     (output_dir / "baseline-idle-result.txt").write_text(idle_pass + "\n", encoding="utf-8")
@@ -232,6 +294,7 @@ def main():
         print(message)
         (output_dir / "supplementary-interaction-result.txt").write_text(message + "\n", encoding="utf-8")
         append_summary("### Supplementary interaction check\n\n**UNVERIFIED** — the UI hierarchy did not expose a usable address control and input readback. Idle startup baseline passed independently.\n")
+        raise SmokeFailure("Supplementary UI interaction is UNVERIFIED; formal emulator gate remains closed despite the independent idle PASS")
 
 
 if __name__ == "__main__":

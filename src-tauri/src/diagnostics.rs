@@ -13,7 +13,9 @@ pub async fn export_android_diagnostics(
     if webview.label() != "main" {
         return Err("Diagnostics export is available only from local settings.".into());
     }
-    let url = webview.url().map_err(|_| "Could not verify the local settings page.")?;
+    let url = webview
+        .url()
+        .map_err(|_| "Could not verify the local settings page.")?;
     if !is_local_entry(&url) {
         return Err("Diagnostics export is available only from local settings.".into());
     }
