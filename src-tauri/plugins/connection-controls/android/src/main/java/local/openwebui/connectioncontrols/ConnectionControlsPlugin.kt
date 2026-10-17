@@ -183,7 +183,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
                     if (beginInvoke != null) beginInvoke?.reject(cleanupError)
                     else Log.e(LOG_TAG, cleanupError)
                 } else beginInvoke?.resolve(beginReply("cancelled"))
-                return@execute
+                return@executeIo
             }
 
             try {
@@ -264,7 +264,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
             val transfer = synchronized(lock) { transfers.remove(args.transferId) }
             if (transfer == null) {
                 invoke.reject("Unknown or finished transferId")
-                return@execute
+                return@executeIo
             }
             try {
                 if (transfer.expectedBytes != null && transfer.bytesWritten != transfer.expectedBytes) {
@@ -311,7 +311,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
             }
             if (transfer == null) {
                 invoke.resolve()
-                return@execute
+                return@executeIo
             }
             try {
                 transfer.output.close()
@@ -319,7 +319,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
                 Log.e(LOG_TAG, "Could not close cancelled document", error)
                 val cleanupError = deleteDocument(transfer.uri)
                 invoke.reject(cleanupError ?: "Could not close cancelled document")
-                return@execute
+                return@executeIo
             }
             val cleanupError = deleteDocument(transfer.uri)
             if (cleanupError == null) invoke.resolve() else invoke.reject(cleanupError)
