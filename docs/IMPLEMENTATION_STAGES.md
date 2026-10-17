@@ -30,7 +30,7 @@ Android 允许应用连接任意明文 HTTP 服务，因此网络安全配置的
 
 初始化 artifact 是 Actions 仓库中的临时文件，不是私密存储；下载后应立即私下备份并删除 artifact 和初始化 run。Actions artifacts 供维护者手动审核和分发，不会自动创建 GitHub Release、公开发布或启用自动更新。用户首次配置、生成和导入 secrets 的步骤见[构建与签名说明](GITHUB_ACTIONS.md)。
 
-阶段四的 workflow、脚本和文档仍需通过新的 GitHub Actions 检查。Windows、macOS、Android 安装启动、连接以及 Android SAF 保存的实机验收均未完成，不应将 CI 结果表述为设备验收通过。
+阶段四源码已通过 GitHub Actions push run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source 与 downstream output SHA 均为 `9effd627031d985395e650bf17933a38e8e56dcd`。Quality job 中 Node tests 20/20、版本一致性检查、JDK 25 临时 PKCS#12 生成 smoke test 和 Rust 格式检查通过；Windows x64 NSIS、macOS ARM64 ad-hoc DMG（Rust library tests 12/12）及 Android ARM64 debug 检查均通过。该 push 正确跳过了仅限 `main` 手动 dispatch 的签名 release job，因此尚未验证签名 APK 的实际生成。Windows、macOS、Android 安装启动、连接以及 Android SAF 保存的实机验收仍未完成，不应将 CI 结果表述为设备验收通过。
 
 ## 后续阶段
 

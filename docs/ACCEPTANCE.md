@@ -2,18 +2,18 @@
 
 ## GitHub Actions 构建
 
-- [ ] 独立 quality job 的完整 npm tests、`npm run version:check`、Rust 格式检查和 JDK 25 临时 PKCS#12 smoke test 通过；临时测试 key 不上传或复用于发行。
-- [ ] PR 和 push 中的 Windows x64、macOS Apple Silicon ARM64 构建成功并上传安装包。
-- [ ] macOS artifact 为一份 ARM64 ad-hoc DMG；Windows artifact 为包含离线 WebView2 Runtime 的 x64 NSIS `setup.exe`。
-- [ ] PR/push 的 Android ARM64 debug 编译检查成功；该 job 不上传 APK，也不表示 release APK 已验收。
+- [x] Stage 4 trusted push run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source/output SHA `9effd627031d985395e650bf17933a38e8e56dcd`：独立 quality 的 npm tests 20/20、`npm run version:check`、Rust 格式检查及 JDK 25 临时 PKCS#12 smoke test 均通过；临时 key 未上传或用于发行。
+- [x] 该 push 的 Windows x64、macOS Apple Silicon ARM64 构建成功并上传安装包。
+- [x] macOS artifact 为一份 ARM64 ad-hoc DMG；Windows artifact 为包含离线 WebView2 Runtime 的 x64 NSIS `setup.exe`。
+- [x] 该 push 的 Android ARM64 debug 编译检查成功；该 job 不上传 APK，也不表示 release APK 已验收。
 - [ ] 只有在 `main` 手动选择 `android` 或 `all` 时才运行签名 Android release job；其它分支的手动运行不签名发行 APK。
 - [ ] 缺少任一签名 secret 时，Android release job 明确失败，不会生成可交付 debug APK。
 - [ ] 配齐签名 secrets 后，Android ARM64 job 生成固定密钥签名 release APK，文件名、artifact 和 job summary 含版本及 `vc<versionCode>`。
 - [ ] Release versionCode 等于 `1000 + github.run_number` 且不超过 `2,100,000,000`；同一 run 重跑使用相同值，新 run 递增；源码/debug versionCode 仍是 `2`。
 - [ ] Android keystore 初始化仅能从 `main` 手动运行；已有 `ANDROID_KEYSTORE_BASE64` 时拒绝重新生成。PKCS#12 artifact 密码保护、只保留一天，未把它当作私密存储。
 - [ ] 手动选择 `all` 时，Android secrets 缺少不会阻止独立的桌面 jobs。
-- [ ] 锁文件引导只提交 `package-lock.json` 和/或 `src-tauri/Cargo.lock` 的真实变化；PR 只读验证锁文件。
-- [ ] 构建产物只作为 Actions artifacts 保存，维护者人工下载、检查和分发；不自动创建 tag、GitHub Release、商店发布或更新。
+- [x] Stage 4 push 的锁文件引导在现有锁文件完整时只读验证并将当前 SHA `9effd627031d985395e650bf17933a38e8e56dcd` 传给后续 jobs；没有生成锁文件或 formatter 提交。
+- [x] 上述平台产物只作为 Actions artifacts 保存；没有创建 tag、GitHub Release、商店发布或更新。
 
 ## 维护者签名密钥初始化
 
