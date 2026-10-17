@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """GitHub-runner-only end-to-end gate. Uses synthetic services, never user data."""
 import argparse
+import csv
+import io
 import json
 import re
 import subprocess
@@ -123,23 +125,28 @@ def tap_any(labels, *, timeout=20):
 def save_to_downloads():
     tap_any(['Show roots', 'Show navigation drawer', 'Open navigation drawer'])
     tap_any(['Downloads', 'Download'])
-    # API29 DocumentsUI can expose visible bottom controls with empty bounds.
-    # Keyboard focus supplies an independent semantic target without guessing
-    # screen coordinates; verify SAVE itself owns focus before pressing Enter.
     controls = nodes('save-controls')
     visible_save = any(n.get('text') in ('SAVE', 'Save') and bounds(n)[2] > bounds(n)[0]
                        and bounds(n)[3] > bounds(n)[1] for n in controls)
     if visible_save:
         tap_any(['SAVE', 'Save'])
     else:
-        for _ in range(16):
-            shell('input keyevent KEYCODE_TAB')
-            focused = nodes('save-keyboard-focus')
-            if any(n.get('text') in ('SAVE', 'Save') and n.get('focused') == 'true' for n in focused):
-                shell('input keyevent KEYCODE_ENTER')
-                break
-        else:
-            raise AssertionError('UNVERIFIED: SAVE control cannot be focused')
+        # API29 DocumentsUI reports empty bounds for its visible save panel.
+        # Locate actual rendered SAVE text, retaining the screenshot and OCR.
+        # Require an enabled DocumentsUI SAVE node and a unique confident match.
+        assert any(n.get('text') in ('SAVE', 'Save') and n.get('enabled') == 'true'
+                   and n.get('package') == 'com.android.documentsui' for n in controls), 'SAVE is not enabled'
+        screenshot('save-ocr')
+        ocr = subprocess.run(['tesseract', str(OUT / 'save-ocr.png'), 'stdout', '--psm', '11', 'tsv'],
+                             capture_output=True, text=True, check=True, timeout=30).stdout
+        (OUT / 'save-ocr.tsv').write_text(ocr, encoding='utf-8')
+        matches = [row for row in csv.DictReader(io.StringIO(ocr), delimiter='\t')
+                   if row['text'].strip().upper() == 'SAVE' and float(row['conf']) >= 80]
+        assert len(matches) == 1, 'UNVERIFIED: visible SAVE text is not unique/confident'
+        row = matches[0]
+        x, y, width, height = (int(row[key]) for key in ('left', 'top', 'width', 'height'))
+        assert width > 0 and height > 0, 'UNVERIFIED: SAVE OCR has empty bounds'
+        shell(f'input tap {x + width//2} {y + height//2}')
     time.sleep(2)
 
 
@@ -198,7 +205,10 @@ class Fixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         port = self.server.server_port
-        if self.path == '/api/config':
+        if self.path == '/fixture.txt':
+            body = b'fixture-download'
+            kind = 'text/plain'
+        elif self.path == '/api/config':
             body = json.dumps({'status': port != 8767}).encode()
             kind = 'application/json'
         else:
@@ -207,8 +217,8 @@ class Fixture(BaseHTTPRequestHandler):
 <style>body{{margin:0;background:#161616;color:white;font:18px sans-serif}}header{{padding:12px}} textarea{{display:block;width:90%;height:80px;font-size:18px}}button,a{{display:block;padding:14px;margin:8px}}main{{height:1300px}}footer{{position:fixed;bottom:0;background:#333;width:100%;height:44px}}</style>
 <header id="fixture-header">Fixture header {port}</header><textarea id="draft" aria-label="Draft">draft-kept</textarea>
 <button id="next-route" onclick="history.pushState({{}},'', '/next');document.querySelector('#route').textContent='Second route'">Next route</button><p id="route">First route</p>
-<button id="download-fixture" onclick="let a=document.createElement('a');a.download='fixture.txt';a.href=URL.createObjectURL(new Blob(['fixture-download']));document.body.appendChild(a);a.click();a.remove();document.querySelector('#download-state').textContent='Download clicked'">Download fixture</button>
-<button id="probe-native" onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p><output id="download-state"></output>
+<a id="download-fixture" href="/fixture.txt" download="fixture.txt">Download fixture</a>
+<button id="probe-native" onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p>
 <output id="scroll-state" style="position:fixed;right:0;top:60px;font-size:10px">Scroll 0</output>
 <script>onpopstate=()=>document.querySelector('#route').textContent=location.pathname==='/next'?'Second route':'First route';onscroll=()=>document.querySelector('#scroll-state').textContent='Scroll '+Math.round(scrollY);</script>
 <main><span id="page-nonce">Page nonce: {time.time_ns()}</span></main><footer>Fixture bottom</footer>
@@ -221,7 +231,7 @@ function reportFixture() {{
     var element = document.querySelector(selectors[label]); var r = element.getBoundingClientRect();
     entries.push({{label:label,text:element.value || element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
   }});
-  ['#route','#security','#scroll-state','#page-nonce','#download-state'].forEach(function(selector) {{
+  ['#route','#security','#scroll-state','#page-nonce'].forEach(function(selector) {{
     var element = document.querySelector(selector); var r = element.getBoundingClientRect();
     entries.push({{label:element.textContent,text:element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
   }});
