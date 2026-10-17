@@ -106,8 +106,14 @@ def tap(label, **kwargs):
 def tap_any(labels, *, timeout=20):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        for node in nodes('picker-controls'):
+        # DocumentsUI retains the covered toolbar and zero-sized controls in
+        # its tree while the roots drawer is open. Prefer the foreground drawer
+        # row, and never treat a tap on an invisible control as a real action.
+        for node in reversed(nodes('picker-controls')):
             if node.get('text') in labels or node.get('content-desc') in labels:
+                x1, y1, x2, y2 = bounds(node)
+                if x2 <= x1 or y2 <= y1 or node.get('enabled') == 'false':
+                    continue
                 tap_node(node)
                 return
         time.sleep(1)
