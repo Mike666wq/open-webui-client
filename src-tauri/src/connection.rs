@@ -772,7 +772,7 @@ mod tests {
         let mut state = ConnectionRuntime::new(Some(saved.clone()));
         state.observe_settings_page(false); // First local page navigation / settings query.
         assert!(state.startup_pending);
-        assert_eq!(state.last_success, Some(saved));
+        assert_eq!(state.last_success, Some(saved.clone()));
         assert_eq!(state.consume_startup_url(), Some(saved));
         state.observe_settings_page(false); // A later local query cannot re-arm it.
         assert!(!state.startup_pending);
