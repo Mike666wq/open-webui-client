@@ -1,0 +1,32 @@
+[package]
+name = "open-webui-client"
+version = "0.2.0"
+description = "Open WebUI Client"
+authors = ["Open WebUI Client"]
+edition = "2024"
+rust-version = "1.94"
+
+[workspace]
+resolver = "3"
+
+[lib]
+name = "open_webui_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+base64 = "=0.22.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "=2.12.3", features = ["dynamic-acl"] }
+tauri-plugin-opener = "=2.7.0"
+tauri-plugin-connection-controls = { path = "plugins/connection-controls" }
+uuid = { version = "=1.18.1", features = ["v4"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-dialog = "=2.8.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem"] }

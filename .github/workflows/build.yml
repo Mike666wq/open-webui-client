@@ -1,0 +1,394 @@
+name: Build desktop and Android packages
+
+on:
+  push:
+    branches:
+      - 'codex/stage-*'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: Which platforms to build
+        type: choice
+        required: true
+        default: desktop
+        options:
+          - desktop
+          - android
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.94.0
+  NODE_VERSION: 22.22.0
+
+jobs:
+  prepare-lockfile:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.lock.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - name: Verify or create Cargo.lock
+        id: lock
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] || [ "$GITHUB_REF_TYPE" != "branch" ]; then
+            if [ -f package-lock.json ] && [ -f src-tauri/Cargo.lock ]; then
+              echo "Both lockfiles exist; this read-only run will use the checked-in lockfiles."
+              echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "A required lockfile is missing. Run lockfile bootstrap on a codex/stage-* branch, then include package-lock.json and src-tauri/Cargo.lock in this read-only run." >&2
+            exit 1
+          fi
+          case "$GITHUB_REF_NAME" in
+            codex/stage-*) ;;
+            *)
+              if [ -f package-lock.json ] && [ -f src-tauri/Cargo.lock ]; then
+                echo "Lockfile bootstrap is restricted to codex/stage-* branches; this read-only run will use the checked-in lockfiles."
+                echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "A required lockfile is missing. Run lockfile bootstrap on a codex/stage-* branch, then include package-lock.json and src-tauri/Cargo.lock in this read-only run." >&2
+              exit 1
+              ;;
+          esac
+
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if [ ! -f src-tauri/Cargo.lock ]; then
+            cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+          else
+            cargo update --workspace --manifest-path src-tauri/Cargo.toml
+          fi
+          cargo fmt --all --manifest-path src-tauri/Cargo.toml
+          cargo fmt --all --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
+          if git diff --quiet -- package-lock.json src-tauri; then
+            echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test -s package-lock.json
+          test -s src-tauri/Cargo.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- package-lock.json src-tauri/Cargo.lock
+          while IFS= read -r changed_file; do
+            if [[ "$changed_file" == *.rs ]]; then
+              git add -- "$changed_file"
+            fi
+          done < <(git diff --name-only --diff-filter=ACMRT -- src-tauri)
+          git commit -m "chore: bootstrap lockfiles and format Rust"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  quality:
+    needs: prepare-lockfile
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run Node tests
+        run: npm test
+      - name: Check synchronized app version
+        run: npm run version:check
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Smoke-test protected Android keystore generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 32)"
+          export ANDROID_KEYSTORE_BASE64=''
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/keystore-smoke.XXXXXX")"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          node scripts/generate-android-keystore.mjs "$smoke_dir"
+          test -s "$smoke_dir/openwebui-client.p12"
+          test -s "$smoke_dir/keystore-fingerprint.txt"
+          echo "Temporary Android keystore generation and certificate fingerprint passed."
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml -- --check
+
+  windows:
+    needs: prepare-lockfile
+    if: ${{ inputs.targets != 'android' }}
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Fetch locked Rust dependencies
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+      - name: Build NSIS installer
+        run: npm run tauri -- build --bundles nsis
+      - name: Collect installer
+        shell: pwsh
+        run: |
+          $version = node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version"
+          git diff --exit-code -- src-tauri/Cargo.lock
+          $files = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis/*.exe' -File
+          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item $files[0].FullName "artifacts/Open-WebUI-Client-$version-windows-x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Open-WebUI-Client-windows-x64
+          path: artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
+          if-no-files-found: error
+
+  macos:
+    needs: prepare-lockfile
+    if: ${{ inputs.targets != 'android' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+      - run: npm ci
+      - name: Fetch locked Rust dependencies
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+      - name: Build ad-hoc DMG
+        run: npm run tauri -- build --target ${{ matrix.target }} --bundles dmg
+      - name: Run Rust library unit tests
+        if: ${{ matrix.target == 'aarch64-apple-darwin' }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --release --locked --target aarch64-apple-darwin
+      - name: Collect DMG
+        shell: bash
+        run: |
+          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          git diff --exit-code -- src-tauri/Cargo.lock
+          shopt -s nullglob
+          files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          test "${#files[@]}" -eq 1 || { echo "Expected one DMG, found ${#files[@]}" >&2; exit 1; }
+          mkdir -p artifacts
+          cp "${files[0]}" "artifacts/Open-WebUI-Client-${version}-macos-${{ matrix.arch }}.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Open-WebUI-Client-macos-${{ matrix.arch }}
+          path: artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  android-check:
+    needs: prepare-lockfile
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Fetch locked Rust dependencies
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+      - name: Initialize Android project
+        run: npm run tauri -- android init --ci
+      - name: Prepare Android manifest and release signing
+        run: node scripts/prepare-android.mjs
+      - name: Compile Android debug APK for CI checks
+        run: npm run tauri -- android build --debug --apk --target aarch64
+      - name: Verify Cargo lockfile stayed unchanged
+        run: git diff --exit-code -- src-tauri/Cargo.lock
+
+  android:
+    needs: prepare-lockfile
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.targets == 'android' || inputs.targets == 'all') }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Fetch locked Rust dependencies
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+      - name: Require Android signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then echo "Required Android signing secret is missing: ${name}" >&2; exit 1; fi
+          done
+          if [ "$KEY_ALIAS" != "openwebui-client" ]; then
+            echo "ANDROID_KEY_ALIAS must be openwebui-client." >&2
+            exit 1
+          fi
+          if [ "$KEY_PASSWORD" != "$KEYSTORE_PASSWORD" ]; then
+            echo "ANDROID_KEY_PASSWORD must match ANDROID_KEYSTORE_PASSWORD for this PKCS#12 keystore." >&2
+            exit 1
+          fi
+      - name: Calculate Android release version code
+        id: release-version
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { versionCodeFromRunNumber } from './scripts/manage-version.mjs';
+
+          const versionCode = versionCodeFromRunNumber(Number(process.env.GITHUB_RUN_NUMBER));
+          appendFileSync(process.env.GITHUB_OUTPUT, `version_code=${versionCode}\n`);
+          appendFileSync(process.env.GITHUB_ENV, `ANDROID_VERSION_CODE=${versionCode}\nANDROID_RELEASE_VERSION_CODE=${versionCode}\n`);
+          NODE
+      - name: Initialize Android project
+        run: npm run tauri -- android init --ci
+      - name: Decode release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/android-signing"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/android-signing/release.keystore"
+          test -s "$RUNNER_TEMP/android-signing/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/android-signing/release.keystore" >> "$GITHUB_ENV"
+      - name: Prepare Android manifest and release signing
+        run: node scripts/prepare-android.mjs
+      - name: Build signed ARM64 APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: npm run tauri -- android build --apk --target aarch64
+      - name: Collect APK
+        shell: bash
+        run: |
+          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          git diff --exit-code -- src-tauri/Cargo.lock
+          shopt -s nullglob
+          files=(src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk)
+          test "${#files[@]}" -eq 1 || { echo "Expected one ARM64 release APK, found ${#files[@]}" >&2; printf '%s\n' "${files[@]}"; exit 1; }
+          mkdir -p artifacts
+          artifact="Open-WebUI-Client-${version}-android-arm64-vc${ANDROID_VERSION_CODE}.apk"
+          cp "${files[0]}" "artifacts/${artifact}"
+          {
+            echo "## Signed Android release artifact"
+            echo "- App version: ${version}"
+            echo "- Android versionCode: ${ANDROID_VERSION_CODE}"
+            echo "- Artifact: ${artifact}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Open-WebUI-Client-android-arm64-vc${{ steps.release-version.outputs.version_code }}
+          path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
+          if-no-files-found: error

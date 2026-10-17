@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/keystore.properties
+src-tauri/gen/android/tauri.properties
+*.jks
+*.keystore
+.DS_Store
+Thumbs.db

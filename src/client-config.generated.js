@@ -1,0 +1,3 @@
+export default Object.freeze({
+  "defaultServiceUrl": "http://192.168.31.60:3000"
+});
