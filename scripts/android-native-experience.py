@@ -80,6 +80,10 @@ def bounds(node):
     return values
 
 
+def text_state(items):
+    return json.dumps([node.attrib for node in items], ensure_ascii=False)
+
+
 def find(label, *, timeout=20):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -236,7 +240,7 @@ try:
     find('Fixture header 8765', timeout=40)
     before = nodes('before-settings')
     nonce = next(n.get('text') for n in before if 'Page nonce:' in n.get('text', ''))
-    assert 'draft-kept' in str(before)
+    assert 'draft-kept' in text_state(before), 'UNVERIFIED: fixture draft value unavailable'
     assert bounds(find('Client menu'))[2] - bounds(find('Client menu'))[0] >= 48
     assert bounds(find('Fixture header 8765'))[1] >= 0
     dump = window_evidence('immersive')
@@ -259,10 +263,10 @@ try:
     enter(field, 'http://127.0.0.1:8766')
     shell('input keyevent KEYCODE_BACK'); tap('CANCEL')
     after = nodes('after-cancel')
-    assert scroll_state in str(after), 'Opening/cancelling settings changed scroll position'
+    assert scroll_state in text_state(after), 'Opening/cancelling settings changed scroll position'
     shell('input swipe 150 300 150 1000 600'); time.sleep(1)
     restored = nodes('scroll-restored')
-    assert nonce in str(restored) and 'draft-kept' in str(restored), 'Opening/cancelling settings changed page state'
+    assert nonce in text_state(restored) and 'draft-kept' in text_state(restored), 'Opening/cancelling settings changed page state'
 
     # Native button drag persists across keyboard changes without reloading page.
     button = find('Client menu'); x1, y1, x2, y2 = bounds(button)
@@ -330,10 +334,10 @@ try:
     # Reload must warn; cancelling keeps the exact document nonce.
     nonce = next(n.get('text') for n in nodes() if 'Page nonce:' in n.get('text', ''))
     menu(); tap('Reload'); find('Leave this page?'); tap('CANCEL')
-    assert nonce in str(nodes()), 'Cancelled reload changed document'
+    assert nonce in text_state(nodes()), 'Cancelled reload changed document'
     menu(); tap('Reload'); tap('CONTINUE')
     time.sleep(3)
-    assert nonce not in str(nodes()), 'Confirmed reload did not reload document'
+    assert nonce not in text_state(nodes()), 'Confirmed reload did not reload document'
 
     # SAF is entered only after a real native menu click. Cancelling is non-destructive.
     menu(); tap('Export Android diagnostics'); time.sleep(2)

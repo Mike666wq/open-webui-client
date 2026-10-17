@@ -89,6 +89,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         val parent = webView.parent as ViewGroup
         parent.addView(root, ViewGroup.LayoutParams(-1, -1))
         root.setBackgroundColor(Color.TRANSPARENT)
+        root.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         button.text = "⋮"
         button.textSize = 25f
         button.setTextColor(Color.WHITE)
