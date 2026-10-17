@@ -73,12 +73,26 @@ impl ConnectionManager {
 
     /// Read-only: unlike status(), never consumes startup auto-connect.
     #[cfg(any(target_os = "android", test))]
-    pub(crate) fn native_snapshot(&self) -> (u64, String, Option<String>, Option<String>, Option<String>) {
+    pub(crate) fn native_snapshot(
+        &self,
+    ) -> (u64, String, Option<String>, Option<String>, Option<String>) {
         let state = self.0.lock().expect("connection state poisoned");
-        let phase = if state.ready { "connected" } else if state.ready_nonce.is_some() { "connecting" }
-            else if state.error.is_some() { "failed" } else { "settings" };
-        (state.generation, phase.into(), state.candidate.as_ref().map(origin_string),
-            state.last_success.as_ref().map(origin_string), state.error.as_ref().map(|_| "connectionFailed".into()))
+        let phase = if state.ready {
+            "connected"
+        } else if state.ready_nonce.is_some() {
+            "connecting"
+        } else if state.error.is_some() {
+            "failed"
+        } else {
+            "settings"
+        };
+        (
+            state.generation,
+            phase.into(),
+            state.candidate.as_ref().map(origin_string),
+            state.last_success.as_ref().map(origin_string),
+            state.error.as_ref().map(|_| "connectionFailed".into()),
+        )
     }
 
     pub(crate) fn fail_attempt(&self, generation: u64, error: String) {
@@ -93,8 +107,12 @@ impl ConnectionManager {
 
     #[cfg(target_os = "android")]
     pub(crate) fn cancel_attempt(&self, generation: u64) -> bool {
-        let Ok(mut state) = self.0.lock() else { return false; };
-        if state.generation != generation || state.ready || state.ready_nonce.is_none() { return false; }
+        let Ok(mut state) = self.0.lock() else {
+            return false;
+        };
+        if state.generation != generation || state.ready || state.ready_nonce.is_none() {
+            return false;
+        }
         state.return_to_settings(true);
         state.error = None;
         true
@@ -314,7 +332,11 @@ impl ConnectionRuntime {
     }
 
     fn timeout(&mut self, generation: u64) -> bool {
-        if self.generation != generation || self.ready || self.candidate.is_none() || self.ready_nonce.is_none() {
+        if self.generation != generation
+            || self.ready
+            || self.candidate.is_none()
+            || self.ready_nonce.is_none()
+        {
             return false;
         }
         self.error
@@ -456,7 +478,12 @@ pub(crate) fn publish_native_state(app: &AppHandle) {
     let _ = app;
 }
 
-pub(crate) fn start_connection(app: AppHandle, webview: Webview, manager: ConnectionManager, address: String) -> Result<(), String> {
+pub(crate) fn start_connection(
+    app: AppHandle,
+    webview: Webview,
+    manager: ConnectionManager,
+    address: String,
+) -> Result<(), String> {
     let url = validate_service_url(&address)?;
     let attempt = manager.begin(url.clone());
     crate::save::invalidate_transfers(&app);
@@ -471,9 +498,14 @@ pub(crate) fn start_connection(app: AppHandle, webview: Webview, manager: Connec
         .permission("allow-save-write-chunk")
         .permission("allow-save-finish")
         .permission("allow-save-cancel");
-    let navigation = app.add_capability(capability)
+    let navigation = app
+        .add_capability(capability)
         .map_err(|error| format!("Could not authorize this server session: {error}"))
-        .and_then(|()| webview.navigate(url).map_err(|error| format!("Could not open the server: {error}")));
+        .and_then(|()| {
+            webview
+                .navigate(url)
+                .map_err(|error| format!("Could not open the server: {error}"))
+        });
     if let Err(error) = navigation {
         manager.fail_attempt(attempt.generation, error.clone());
         publish_native_state(&app);
@@ -736,7 +768,10 @@ mod tests {
     fn native_snapshot_never_consumes_startup_or_invalidates_the_session() {
         let runtime = ConnectionRuntime::new(Some(url("https://old.example.org")));
         let manager = ConnectionManager(Arc::new(Mutex::new(runtime)));
-        assert_eq!(manager.native_snapshot().3.as_deref(), Some("https://old.example.org"));
+        assert_eq!(
+            manager.native_snapshot().3.as_deref(),
+            Some("https://old.example.org")
+        );
         assert_eq!(manager.native_snapshot().1, "settings");
         assert!(manager.0.lock().unwrap().startup_pending);
         let attempt = manager.begin(url("https://new.example.org"));
@@ -744,7 +779,10 @@ mod tests {
         assert_eq!(manager.native_snapshot().0, attempt.generation);
         manager.fail_attempt(attempt.generation, "failure".into());
         assert_eq!(manager.native_snapshot().1, "failed");
-        assert_eq!(manager.native_snapshot().3.as_deref(), Some("https://old.example.org"));
+        assert_eq!(
+            manager.native_snapshot().3.as_deref(),
+            Some("https://old.example.org")
+        );
         assert!(!manager.timeout(attempt.generation));
     }
 

@@ -59,18 +59,38 @@ pub struct DiagnosticsExportReply {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum NativeClientAction {
-    Snapshot { #[serde(rename = "requestId")] request_id: String },
-    Connect { #[serde(rename = "requestId")] request_id: String, address: String },
-    Cancel { #[serde(rename = "requestId")] request_id: String, generation: u64 },
-    Reload { #[serde(rename = "requestId")] request_id: String, generation: u64 },
-    ExportDiagnostics { #[serde(rename = "requestId")] request_id: String },
+    Snapshot {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    Connect {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        address: String,
+    },
+    Cancel {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        generation: u64,
+    },
+    Reload {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        generation: u64,
+    },
+    ExportDiagnostics {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
 }
 
 impl NativeClientAction {
     pub fn request_id(&self) -> &str {
         match self {
-            Self::Snapshot { request_id } | Self::Connect { request_id, .. }
-            | Self::Cancel { request_id, .. } | Self::Reload { request_id, .. }
+            Self::Snapshot { request_id }
+            | Self::Connect { request_id, .. }
+            | Self::Cancel { request_id, .. }
+            | Self::Reload { request_id, .. }
             | Self::ExportDiagnostics { request_id } => request_id,
         }
     }
@@ -119,24 +139,38 @@ impl<R: Runtime> Clone for ConnectionControlsBridge<R> {
 
 impl<R: Runtime> ConnectionControlsBridge<R> {
     #[cfg(target_os = "android")]
-    pub async fn install_native_actions(&self, actions: tauri::ipc::Channel<NativeClientAction>) -> Result<(), String> {
+    pub async fn install_native_actions(
+        &self,
+        actions: tauri::ipc::Channel<NativeClientAction>,
+    ) -> Result<(), String> {
         #[derive(Serialize)]
-        struct Args { actions: tauri::ipc::Channel<NativeClientAction> }
-        self.handle.run_mobile_plugin_async::<()>("installNativeActions", Args { actions })
-            .await.map_err(|error| error.to_string())
+        struct Args {
+            actions: tauri::ipc::Channel<NativeClientAction>,
+        }
+        self.handle
+            .run_mobile_plugin_async::<()>("installNativeActions", Args { actions })
+            .await
+            .map_err(|error| error.to_string())
     }
 
     #[cfg(target_os = "android")]
     pub async fn render_connection_state(&self, state: NativeClientState) -> Result<(), String> {
-        self.handle.run_mobile_plugin_async::<()>("renderConnectionState", state)
-            .await.map_err(|error| error.to_string())
+        self.handle
+            .run_mobile_plugin_async::<()>("renderConnectionState", state)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     #[cfg(target_os = "android")]
     pub async fn show_native_notice(&self, code: &str) {
         #[derive(Serialize)]
-        struct Args<'a> { code: &'a str }
-        let _ = self.handle.run_mobile_plugin_async::<()>("showNativeNotice", Args { code }).await;
+        struct Args<'a> {
+            code: &'a str,
+        }
+        let _ = self
+            .handle
+            .run_mobile_plugin_async::<()>("showNativeNotice", Args { code })
+            .await;
     }
 
     pub async fn save_begin(&self, args: BeginSaveArgs) -> Result<BeginSaveReply, String> {
