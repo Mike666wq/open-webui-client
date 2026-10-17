@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const EXPECTED_APPLICATION_ID = 'local.openwebui.client';
 const EXPECTED_MIN_SDK = 29;
+const MAX_VALIDATOR_OUTPUT_BYTES = 32 * 1024 * 1024;
 
 export function validateAndroidApkMetadata({ badging, entries, versionCode }) {
   if (!Number.isSafeInteger(versionCode) || versionCode < 1001 || versionCode > 2_100_000_000) {
@@ -77,13 +78,23 @@ export function validateAndroidApkIconPayloads(entries, readArchiveEntry, readGe
   return true;
 }
 
-function run(program, args, env = process.env) {
-  const result = spawnSync(program, args, { encoding: 'utf8', env });
+export function runValidationCommand(program, args, env = process.env) {
+  const result = spawnSync(program, args, {
+    encoding: 'utf8',
+    env,
+    maxBuffer: MAX_VALIDATOR_OUTPUT_BYTES,
+  });
   if (result.error || result.status !== 0) {
-    throw new Error(`${path.basename(program)} validation failed`);
+    const detail = path.basename(program) === 'aapt'
+      ? `: ${(result.stderr ?? '').trim().split(/\r?\n/)[0].slice(0, 240)}`
+      : '';
+    const status = result.error?.code ?? `exit ${result.status}`;
+    throw new Error(`${path.basename(program)} validation failed (${status})${detail}`);
   }
   return result.stdout;
 }
+
+const run = runValidationCommand;
 
 function runBytes(program, args, env = process.env) {
   const result = spawnSync(program, args, { env });

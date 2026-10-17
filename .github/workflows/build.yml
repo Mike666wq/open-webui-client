@@ -15,7 +15,7 @@ on:
           - candidate
           - release
       skip_emulator:
-        description: Skip hosted Android emulator checks when runner infrastructure is unavailable; validate the signed package on a physical device
+        description: Skip emulator checks for investigation only; this run cannot publish a Release
         required: false
         type: boolean
         default: false
@@ -346,7 +346,8 @@ jobs:
           function Assert-EmbeddedIconMatches([string]$exePath, [string]$expectedIco) {
             $actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $exePath))
             if ($null -eq $actualIcon) { throw "No embedded Windows icon resource in $exePath" }
-            $expectedIcon = [System.Drawing.Icon]::new((Resolve-Path $expectedIco), $actualIcon.Size)
+            $resolvedExpectedIcon = Resolve-Path -LiteralPath $expectedIco
+            $expectedIcon = [System.Drawing.Icon]::new($resolvedExpectedIcon.Path, $actualIcon.Size)
             $actualBitmap = $actualIcon.ToBitmap()
             $expectedBitmap = $expectedIcon.ToBitmap()
             try {
@@ -426,9 +427,9 @@ jobs:
           }
           trap cleanup_mount EXIT
           hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mountpoint" >/dev/null
-          mapfile -t apps < <(find "$mountpoint" -maxdepth 2 -type d -name '*.app')
-          test "${#apps[@]}" -eq 1 || { echo "Expected one app bundle in DMG, found ${#apps[@]}" >&2; exit 1; }
-          app="${apps[0]}"
+          app_count="$(find "$mountpoint" -maxdepth 2 -type d -name '*.app' | wc -l | tr -d '[:space:]')"
+          test "$app_count" -eq 1 || { echo "Expected one app bundle in DMG, found $app_count" >&2; exit 1; }
+          app="$(find "$mountpoint" -maxdepth 2 -type d -name '*.app' -print -quit)"
           icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")"
           icon_name="$(basename "$icon_name")"
           [[ "$icon_name" == *.icns ]] || icon_name="${icon_name}.icns"
@@ -656,7 +657,7 @@ jobs:
 
   publish-release:
     needs: [prepare-release, release-quality, windows, macos, android, release-emulator-smoke]
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && (needs.release-emulator-smoke.result == 'success' || inputs.skip_emulator == true) }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write

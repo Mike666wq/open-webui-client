@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateAndroidApkIconPayloads, validateAndroidApkIcons, validateAndroidApkMetadata, validateSigningFingerprint } from './verify-android-apk.mjs';
+import { runValidationCommand, validateAndroidApkIconPayloads, validateAndroidApkIcons, validateAndroidApkMetadata, validateSigningFingerprint } from './verify-android-apk.mjs';
 
 const badging = `package: name='local.openwebui.client' versionCode='1042' versionName='0.2.1'\nsdkVersion:'29'\ntargetSdkVersion:'36'`;
 const entries = 'AndroidManifest.xml\nlib/arm64-v8a/libapp.so\n';
+
+test('AAPT-sized command output is not truncated at Node’s default subprocess buffer', () => {
+  const output = runValidationCommand(process.execPath, [
+    '-e',
+    'process.stdout.write("x".repeat(2 * 1024 * 1024))',
+  ]);
+  assert.equal(output.length, 2 * 1024 * 1024);
+});
 
 test('signed release APK metadata must match package, minSdk, ARM64 ABI and pinned code', () => {
   assert.deepEqual(validateAndroidApkMetadata({ badging, entries, versionCode: 1042 }), {
