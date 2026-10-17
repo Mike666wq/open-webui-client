@@ -386,6 +386,11 @@ jobs:
             echo "- API level: $ANDROID_SMOKE_API"
             echo "- The script records the idle baseline and supplementary interaction result separately."
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify Android native chrome and real connection interactions
+        if: ${{ needs.choose-source.outputs.source_kind != 'v0.2.2-baseline' }}
+        shell: bash
+        run: |
+          python scripts/android-native-experience.py --output "$RUNNER_TEMP/android-emulator-evidence/native-ui"
       - name: Upload filtered diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4

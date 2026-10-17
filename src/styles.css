@@ -44,3 +44,15 @@ button:disabled { cursor: wait; opacity: .6; }
 .secondary { display: block; margin: 20px auto 0; color: #d1d5db; background: #273449; font-size: 12px; }
 button[hidden] { display: none; }
 .error { color: #fca5a5; font-size: 13px; overflow-wrap: anywhere; }
+
+/* Native Android owns window insets; this only styles the bundled settings page. */
+body.android-client { min-height: 100dvh; }
+.android-client .panel { padding: 24px 16px; }
+.android-client input { font-size: 16px; min-height: 48px; }
+.android-client button { min-height: 48px; }
+@media (max-height: 520px) {
+  body.android-client { place-items: start center; }
+  .android-client .mark { width: 40px; height: 40px; margin-bottom: 8px; }
+  .android-client .panel { padding-top: 12px; }
+  .android-client form { margin-top: 12px; }
+}

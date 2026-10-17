@@ -1,5 +1,7 @@
 use tauri::Manager;
 
+#[cfg(target_os = "android")]
+mod android_client;
 mod connection;
 mod diagnostics;
 mod navigation;
@@ -11,6 +13,8 @@ pub fn run() {
         .setup(|app| {
             let _ = app.manage(connection::ConnectionManager::load(app.handle()));
             let _ = app.manage(save::SaveManager::default());
+            #[cfg(target_os = "android")]
+            android_client::install(app.handle());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())

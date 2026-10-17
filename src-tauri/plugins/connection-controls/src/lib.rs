@@ -55,6 +55,39 @@ pub struct DiagnosticsExportReply {
     pub status: String,
 }
 
+/// Never accepted from a page invoke: this channel is installed by app-owned Rust.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum NativeClientAction {
+    Snapshot { #[serde(rename = "requestId")] request_id: String },
+    Connect { #[serde(rename = "requestId")] request_id: String, address: String },
+    Cancel { #[serde(rename = "requestId")] request_id: String, generation: u64 },
+    Reload { #[serde(rename = "requestId")] request_id: String, generation: u64 },
+    ExportDiagnostics { #[serde(rename = "requestId")] request_id: String },
+}
+
+impl NativeClientAction {
+    pub fn request_id(&self) -> &str {
+        match self {
+            Self::Snapshot { request_id } | Self::Connect { request_id, .. }
+            | Self::Cancel { request_id, .. } | Self::Reload { request_id, .. }
+            | Self::ExportDiagnostics { request_id } => request_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeClientState {
+    pub request_id: String,
+    pub generation: u64,
+    pub revision: u64,
+    pub phase: String,
+    pub candidate_url: Option<String>,
+    pub last_success_url: Option<String>,
+    pub error_code: Option<String>,
+}
+
 /// Android SAF bridge retained by the plugin and consumed by app-owned Rust commands.
 ///
 /// The native picker and document URI are never exposed to frontend JavaScript. On
@@ -85,6 +118,27 @@ impl<R: Runtime> Clone for ConnectionControlsBridge<R> {
 }
 
 impl<R: Runtime> ConnectionControlsBridge<R> {
+    #[cfg(target_os = "android")]
+    pub async fn install_native_actions(&self, actions: tauri::ipc::Channel<NativeClientAction>) -> Result<(), String> {
+        #[derive(Serialize)]
+        struct Args { actions: tauri::ipc::Channel<NativeClientAction> }
+        self.handle.run_mobile_plugin_async::<()>("installNativeActions", Args { actions })
+            .await.map_err(|error| error.to_string())
+    }
+
+    #[cfg(target_os = "android")]
+    pub async fn render_connection_state(&self, state: NativeClientState) -> Result<(), String> {
+        self.handle.run_mobile_plugin_async::<()>("renderConnectionState", state)
+            .await.map_err(|error| error.to_string())
+    }
+
+    #[cfg(target_os = "android")]
+    pub async fn show_native_notice(&self, code: &str) {
+        #[derive(Serialize)]
+        struct Args<'a> { code: &'a str }
+        let _ = self.handle.run_mobile_plugin_async::<()>("showNativeNotice", Args { code }).await;
+    }
+
     pub async fn save_begin(&self, args: BeginSaveArgs) -> Result<BeginSaveReply, String> {
         #[cfg(target_os = "android")]
         {
@@ -171,6 +225,12 @@ pub fn init<R: Runtime>(settings_url: impl Into<String>) -> TauriPlugin<R> {
     let _ = settings_url;
 
     Builder::new("connection-controls")
+        // Returning true is essential: false forwards page calls to Kotlin.
+        // Rust PluginHandle calls bypass this page-invoke handler.
+        .invoke_handler(|invoke| {
+            invoke.resolver.reject("This plugin is native-only");
+            true
+        })
         .setup(move |app, api| {
             #[cfg(target_os = "android")]
             {

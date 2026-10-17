@@ -71,6 +71,35 @@ impl ConnectionManager {
         Self(Arc::new(Mutex::new(ConnectionRuntime::new(last_success))))
     }
 
+    /// Read-only: unlike status(), never consumes startup auto-connect.
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn native_snapshot(&self) -> (u64, String, Option<String>, Option<String>, Option<String>) {
+        let state = self.0.lock().expect("connection state poisoned");
+        let phase = if state.ready { "connected" } else if state.ready_nonce.is_some() { "connecting" }
+            else if state.error.is_some() { "failed" } else { "settings" };
+        (state.generation, phase.into(), state.candidate.as_ref().map(origin_string),
+            state.last_success.as_ref().map(origin_string), state.error.as_ref().map(|_| "connectionFailed".into()))
+    }
+
+    pub(crate) fn fail_attempt(&self, generation: u64, error: String) {
+        if let Ok(mut state) = self.0.lock() {
+            if state.generation == generation && !state.ready {
+                state.error = Some(error);
+                state.ready_nonce = None;
+                state.session_token = None;
+            }
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn cancel_attempt(&self, generation: u64) -> bool {
+        let Ok(mut state) = self.0.lock() else { return false; };
+        if state.generation != generation || state.ready || state.ready_nonce.is_none() { return false; }
+        state.return_to_settings(true);
+        state.error = None;
+        true
+    }
+
     fn begin(&self, url: Url) -> Attempt {
         self.0.lock().expect("connection state poisoned").begin(url)
     }
@@ -285,7 +314,7 @@ impl ConnectionRuntime {
     }
 
     fn timeout(&mut self, generation: u64) -> bool {
-        if self.generation != generation || self.ready || self.candidate.is_none() {
+        if self.generation != generation || self.ready || self.candidate.is_none() || self.ready_nonce.is_none() {
             return false;
         }
         self.error
@@ -417,6 +446,17 @@ pub async fn connect_service(
     address: String,
 ) -> Result<(), String> {
     ensure_local_webview(&webview)?;
+    start_connection(app, webview, manager.inner().clone(), address)
+}
+
+pub(crate) fn publish_native_state(app: &AppHandle) {
+    #[cfg(target_os = "android")]
+    crate::android_client::publish(app);
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
+}
+
+pub(crate) fn start_connection(app: AppHandle, webview: Webview, manager: ConnectionManager, address: String) -> Result<(), String> {
     let url = validate_service_url(&address)?;
     let attempt = manager.begin(url.clone());
     crate::save::invalidate_transfers(&app);
@@ -431,19 +471,24 @@ pub async fn connect_service(
         .permission("allow-save-write-chunk")
         .permission("allow-save-finish")
         .permission("allow-save-cancel");
-    app.add_capability(capability)
-        .map_err(|error| format!("Could not authorize this server session: {error}"))?;
-    webview
-        .navigate(url)
-        .map_err(|error| format!("Could not open the server: {error}"))?;
+    let navigation = app.add_capability(capability)
+        .map_err(|error| format!("Could not authorize this server session: {error}"))
+        .and_then(|()| webview.navigate(url).map_err(|error| format!("Could not open the server: {error}")));
+    if let Err(error) = navigation {
+        manager.fail_attempt(attempt.generation, error.clone());
+        publish_native_state(&app);
+        return Err(error);
+    }
+    publish_native_state(&app);
 
     let app_for_timeout = app.clone();
-    let manager_for_timeout = manager.inner().clone();
+    let manager_for_timeout = manager.clone();
     let generation = attempt.generation;
     thread::spawn(move || {
         thread::sleep(CONNECTION_TIMEOUT);
         if manager_for_timeout.timeout(generation) {
             crate::save::invalidate_transfers(&app_for_timeout);
+            publish_native_state(&app_for_timeout);
             if let Some(window) = app_for_timeout.get_webview_window("main") {
                 let _ = window.navigate(settings_url());
             }
@@ -470,12 +515,14 @@ pub async fn connection_ready(
     }) {
         Ok(token) => token,
         Err(error) => {
+            publish_native_state(&app);
             if manager.should_return_after_ready_error(generation, &current_origin) {
                 let _ = webview.navigate(settings_url());
             }
             return Err(error);
         }
     };
+    publish_native_state(&app);
     let injection = format!(
         "window.__OWC_SESSION__={{generation:{generation},token:{}}};",
         serde_json::to_string(&token).map_err(|error| error.to_string())?
@@ -683,6 +730,36 @@ mod tests {
 
     fn url(value: &str) -> Url {
         validate_service_url(value).unwrap()
+    }
+
+    #[test]
+    fn native_snapshot_never_consumes_startup_or_invalidates_the_session() {
+        let runtime = ConnectionRuntime::new(Some(url("https://old.example.org")));
+        let manager = ConnectionManager(Arc::new(Mutex::new(runtime)));
+        assert_eq!(manager.native_snapshot().3.as_deref(), Some("https://old.example.org"));
+        assert_eq!(manager.native_snapshot().1, "settings");
+        assert!(manager.0.lock().unwrap().startup_pending);
+        let attempt = manager.begin(url("https://new.example.org"));
+        assert_eq!(manager.native_snapshot().1, "connecting");
+        assert_eq!(manager.native_snapshot().0, attempt.generation);
+        manager.fail_attempt(attempt.generation, "failure".into());
+        assert_eq!(manager.native_snapshot().1, "failed");
+        assert_eq!(manager.native_snapshot().3.as_deref(), Some("https://old.example.org"));
+        assert!(!manager.timeout(attempt.generation));
+    }
+
+    #[test]
+    fn native_actions_are_typed_and_fail_closed() {
+        use tauri_plugin_connection_controls::NativeClientAction;
+        let request = r#"{"type":"connect","requestId":"a","address":"http://localhost:3000"}"#;
+        assert!(serde_json::from_str::<NativeClientAction>(request).is_ok());
+        for request in [
+            r#"{"type":"connect","requestId":"a"}"#,
+            r#"{"type":"configure","requestId":"a"}"#,
+            r#"{"type":"reload","requestId":"a","generation":1,"address":"https://other.example"}"#,
+        ] {
+            assert!(serde_json::from_str::<NativeClientAction>(request).is_err());
+        }
     }
 
     #[test]
