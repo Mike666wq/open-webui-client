@@ -10,6 +10,9 @@ on:
       - 'scripts/select-android-smoke-source.test.mjs'
       - 'scripts/download-bridge.js'
       - 'scripts/link-bridge.js'
+      - 'scripts/prepare-assets.mjs'
+      - 'scripts/android-icons.mjs'
+      - 'public/**'
       - 'src/**'
       - 'index.html'
       - 'package.json'
@@ -44,7 +47,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-emulator-diagnose-${{ github.ref }}
+  group: android-emulator-diagnose-${{ github.run_id }}-${{ inputs.source_sha || github.sha }}
   cancel-in-progress: false
 
 env:

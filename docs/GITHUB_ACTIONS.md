@@ -1,8 +1,16 @@
 # GitHub Actions 与正式发布
 
-构建工作流位于 `.github/workflows/build.yml`，一次性 Android keystore 初始化位于 `.github/workflows/bootstrap-android-keystore.yml`。日常开发只在 `main` 上进行。main push 运行 Node tests、版本一致性、JDK 25 临时 PKCS#12 smoke test、Rust 格式检查，以及一个仅核对并删除四个指定且已合入旧 stage 分支的清理 job；它不会启动三端构建或发布安装包。工作流不接受可选平台输入。
+构建工作流位于 `.github/workflows/build.yml`，Android emulator 启动诊断位于 `.github/workflows/android-emulator-diagnose.yml`，一次性 Android keystore 初始化位于 `.github/workflows/bootstrap-android-keystore.yml`。日常开发只在 `main` 上进行。main push 运行 Node tests、版本一致性、JDK 25 临时 PKCS#12 smoke test、Rust 格式检查，以及一个仅核对并删除四个指定且已合入旧 stage 分支的清理 job；修改 app 行为文件时还会启动单独的 x86_64 emulator 诊断，但不会发布安装包。手动 build workflow 接受 `candidate` 或 `release` 模式，不接受平台选择。
 
-在仓库 **Actions → Build desktop and Android packages → Run workflow** 中选择 `main` 并手动运行，开始一次正式发布。workflow 会先验证两项 Android signing secrets，然后将 stable semver patch 递增并通过 GitHub API non-force 地提交到 `main`。这个 run 的 quality 与 Windows、macOS、Android jobs 都 checkout 同一新提交 SHA。Windows x64 生成含离线 WebView2 Runtime 的 NSIS installer；macOS ARM64 生成 ad-hoc DMG 并运行 Rust library tests；Android 生成签名 ARM64 release APK。三端都成功后才创建不可移动的版本 tag、上传三个包和 `SHA256SUMS` 并公开 GitHub Release。未全部成功时不会公开 Release。手动 run 不会创建 PAT，也不运行自动更新。
+在仓库 **Actions → Build desktop and Android packages → Run workflow** 中选择 `main` 和运行模式。`release` 会先验证两项 Android signing secrets，然后将 stable semver patch 递增并通过 GitHub API non-force 地提交到 `main`。这个 run 的 quality 与 Windows、macOS、Android jobs 都 checkout 同一新提交 SHA。Windows x64 生成含离线 WebView2 Runtime 的 NSIS installer；macOS ARM64 生成 ad-hoc DMG 并运行 Rust library tests；Android 生成签名 ARM64 release APK。API 29 和 36 模拟器启动检查通过后，三端构建都成功才创建不可移动的版本 tag、上传三个包和 `SHA256SUMS` 并公开 GitHub Release。未全部成功时不会公开 Release。手动 run 不会创建 PAT，也不运行自动更新。
+
+`candidate` 模式用于先在 Android 真机验证当前 `main`。它不修改应用语义版本、不创建 tag/Release，只生成受两项现有 secrets 签名的 ARM64 APK，versionCode 为 `1000 + github.run_number`，artifact 保留三天；它也要求 API 29/36 模拟器检查通过。使用步骤：
+
+1. 在 **Actions → Build desktop and Android packages → Run workflow** 选择 `main` 和 `candidate`，等待 `candidate-quality`、`candidate-emulator-smoke` 与 `android-candidate` 成功。
+2. 打开这次 workflow run，下载名称以 `Open-WebUI-Client-candidate-` 开头的 artifact 并解压 APK。候选 APK 使用固定 release keystore 签名，且 versionCode 高于已发布版本，可在相同签名身份的 Redmi 安装上直接覆盖安装（例如 `adb install -r <候选APK路径>`）；不需要卸载旧 app。
+3. 在 Redmi 上记录 Android 版本、候选源 SHA 和 APK versionCode，检查启动、前台稳定性与连接页。若系统报告签名或版本错误，停止安装并先核对 artifact，不要卸载已有 app 来绕过错误。
+
+该候选 run 中的 emulator smoke APK 是另一份 x86_64、临时密钥签名的测试 APK，只用于 API 29/36 hosted emulator；它不是上述固定密钥 ARM64 candidate，不能覆盖安装 release。模拟器检查结果只说明对应 emulator/source 的行为，不等于 Redmi 等实体设备通过。
 
 ## 首次配置 Android 签名密钥
 
@@ -31,9 +39,9 @@
 
 应用版本同步保存在 `package.json`、`package-lock.json`、Tauri 配置和 app Cargo 元数据中。发布 workflow 自动执行 patch bump 并将版本提交到 `main`；手工版本调整可运行 `npm run version:check` 验证。Android release `versionCode` 为 `1000 + github.run_number`，并限制在 Android 支持的上限内。相同 run 重试会复用原版本提交、tag 和 versionCode；新的手动 run 会再次递增 patch 与 run number。若构建失败，版本 bump commit 会留在 main，但不会发布 Release。修复问题后启动一个新的手动 run，它会使用下一个 patch 版本。
 
-正式包通过 GitHub 仓库的 **Releases** 页面下载，release 含 Windows、macOS 和 Android ARM64 安装文件及 SHA-256 校验值。Actions artifacts 是构建过程中的临时材料，不是正式发布页面。workflow 只在全部平台成功后公开 Release；它不发布到应用商店、不启用自动更新，也不进行公开前的设备验收。
+正式包通过 GitHub 仓库的 **Releases** 页面下载，release 含 Windows、macOS 和 Android ARM64 安装文件及 SHA-256 校验值。Actions artifacts 是构建过程中的临时材料，不是正式发布页面。workflow 只在所有平台构建和模拟器检查成功后公开 Release；它不发布到应用商店、不启用自动更新，也不替代实体设备验收。
 
-桌面签名状态保持不变：Windows NSIS 包包含离线 WebView2 Runtime；macOS DMG 仅 ad-hoc 签名，没有 Developer ID 签名或公证。首次打开 macOS 应用时只对该应用使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。当前 CI 不验证真实设备安装、连接或 Android SAF 文件保存行为；这些仍需按[验收清单](ACCEPTANCE.md)手动完成。
+桌面签名状态保持不变：Windows NSIS 包包含离线 WebView2 Runtime；macOS DMG 仅 ad-hoc 签名，没有 Developer ID 签名或公证。首次打开 macOS 应用时只对该应用使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。Android 候选/release 构建的模拟器检查不验证 Redmi 等实体设备上的安装、连接或 SAF provider 保存清理行为；这些仍需按[验收清单](ACCEPTANCE.md)手动完成。Android 官方图标已接入构建源码，最终包图标校验等待当前 CI 运行确认。
 
 ## 固定构建环境
 

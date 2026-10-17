@@ -28,11 +28,17 @@ Android 允许应用连接任意明文 HTTP 服务，因此网络安全配置的
 
 阶段四增加固定 Android keystore、main 手动发布、自动 patch bump 和 GitHub Release 编排。维护者首次在仓库中设置 `ANDROID_KEYSTORE_PASSWORD`，从 main 运行初始化 workflow 并安全备份密码保护的 RSA 3072 位 PKCS#12，再将该文件的 Base64 设置为 `ANDROID_KEYSTORE_BASE64`。alias 固定为 `openwebui-client`，key password 复用 store password。已有 keystore 时拒绝重生成。
 
-正式发布只接受 main 上无参数的手动 dispatch。workflow 在版本 bump 前验证两项签名 secrets 和实际 PKCS#12/alias；通过后由 GitHub Actions `GITHUB_TOKEN` non-force 地将 patch bump 提交到 main，随后 quality 与 Windows x64、macOS ARM64、Android ARM64 全部 checkout 同一 SHA。Android release `versionCode` 为 `1000 + github.run_number`；源码/debug 保持 `2`。仅三端构建全部成功后，workflow 才创建 tag、上传三个安装包和 `SHA256SUMS` 并公开 Release。构建失败会保留版本 bump commit，但不会公开 Release；同一 run 重试复用原 pinned 版本。没有 PAT、自动更新、商店发布或桌面正式签名。
+正式发布只接受 main 上的手动 dispatch，并提供 `candidate` 与 `release` 两种模式。release workflow 在版本 bump 前验证两项签名 secrets 和实际 PKCS#12/alias；通过后由 GitHub Actions `GITHUB_TOKEN` non-force 地将 patch bump 提交到 main，随后 quality 与 Windows x64、macOS ARM64、Android ARM64 全部 checkout 同一 SHA。Android release `versionCode` 为 `1000 + github.run_number`；源码/debug 保持 `2`。API 29/36 emulator gate 与三端构建全部成功后，workflow 才创建 tag、上传三个安装包和 `SHA256SUMS` 并公开 Release。构建失败会保留版本 bump commit，但不会公开 Release；同一 run 重试复用原 pinned 版本。没有 PAT、自动更新、商店发布或桌面正式签名。
 
 初始化 artifact 只保留一天且不是私密存储，下载并安全备份后需立即删除 artifact 和初始化 run。手动 secret 配置与发布步骤见[构建与签名说明](GITHUB_ACTIONS.md)。main push 只运行 Node/version、JDK 25 临时 keystore smoke、Rust 格式质量检查及已合入旧 stage branch 的受限清理，不启动原生构建。
 
 阶段四基线通过 GitHub Actions run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source/output SHA 均为 `9effd627031d985395e650bf17933a38e8e56dcd`。main-only 发布流程修复 run [#51](https://github.com/Mike666wq/open-webui-client/actions/runs/38995797837) 通过：Node tests 33/33、无 skipped，版本一致性、JDK 25 临时 PKCS#12 smoke、Rust 格式及固定旧分支清理均成功。首次完整签名发布 run [#52](https://github.com/Mike666wq/open-webui-client/actions/runs/38995899635) 也已成功：signing secrets/PKCS#12 alias 校验通过，版本自动递增至 `0.2.2`，所有质量检查和 Windows、macOS ARM64、Android ARM64 构建来自 pinned SHA `3edd2b1191f5f7bbd56cf2d35dd401bb61489f10`。macOS Rust library tests 为 12/12；Android signed APK 的证书、package ID、minSdk、ARM64 ABI 和 versionCode 检查通过。Run #52 以 versionCode `1052` 创建并公开 [Release v0.2.2](https://github.com/Mike666wq/open-webui-client/releases/tag/v0.2.2)，包括 Windows NSIS、macOS ARM64 ad-hoc DMG、Android ARM64 signed APK 和 `SHA256SUMS`。匿名下载验收通过：4 个 release 资产无需登录均返回 HTTP 200 且长度匹配；`SHA256SUMS` 仅列三安装包，完整流式校验值与其内容及 GitHub REST digest 一致，未将安装包落盘。Windows/macOS/Android 真机安装、连接和升级，以及 Android SAF picker、保存与 provider 清理行为仍待验收。
+
+## Android 启动诊断与官方图标
+
+当前源码统一使用 Open WebUI 官方图标：连接页/favicon、Windows/macOS bundle 图标、Android 普通与 round/adaptive launcher 及 Android 12 splash 均由固定 SHA-256 的上游 PNG 派生。Android APK 验证检查包内 launcher 图像 payload 与同构建生成资源一致；Windows/macOS/Android 最终产物的图标门禁仍待当前 CI run 确认，因此暂不记为已验证。
+
+已知 Redmi 设备在启动后约 10 秒内退出，根因仍未定位，也没有声明修复。诊断 run #1 ([39002189585](https://github.com/Mike666wq/open-webui-client/actions/runs/39002189585)) 在 apksigner 路径检查失败；run #2 ([39002664958](https://github.com/Mike666wq/open-webui-client/actions/runs/39002664958)) 因 setup-android 使用 JDK 11，在模拟器启动前失败。提交 591b8fdec0100494fb70ee9873aeffb764c4ff30 已补充 Temurin JDK 25。run #3 ([39005472690](https://github.com/Mike666wq/open-webui-client/actions/runs/39005472690)) 已选中 v0.2.2 基线 SHA 3edd2b1191f5f7bbd56cf2d35dd401bb61489f10，当前正在构建 x86_64 诊断 APK，运行时结果待定。candidate 模式不递增版本，使用当前 main 和固定 keystore 构建 ARM64 APK；API 29/36 emulator gate 通过后提供三天 Actions artifact。模拟器通过不代表 Redmi 真机通过，最终结论仍需真机验收。
 
 ## 后续阶段
 

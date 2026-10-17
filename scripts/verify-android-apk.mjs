@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,8 +37,56 @@ export function validateSigningFingerprint(keystoreOutput, apkOutput) {
   return true;
 }
 
+export function validateAndroidApkIcons(resourceDump) {
+  for (const resource of [
+    'mipmap/ic_launcher',
+    'mipmap/ic_launcher_round',
+    'mipmap/ic_launcher_foreground',
+    'color/ic_launcher_background',
+  ]) {
+    if (!resourceDump.includes(resource)) {
+      throw new Error(`APK is missing the official launcher icon resource ${resource}`);
+    }
+  }
+  if (!resourceDump.includes('windowSplashScreenAnimatedIcon') ||
+      !resourceDump.includes('windowSplashScreenBackground')) {
+    throw new Error('APK is missing Android 12 splash-screen icon resources');
+  }
+  return true;
+}
+
+export function validateAndroidApkIconPayloads(entries, readArchiveEntry, readGeneratedIcon) {
+  const densities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
+  const names = ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png'];
+  for (const density of densities) {
+    for (const name of names) {
+      const suffix = new RegExp('^res/mipmap-' + density + '(?:-v\\d+)?/' + name.replaceAll('.', '\\.') + '$');
+      const matches = entries.split(/\r?\n/).filter((entry) => suffix.test(entry));
+      if (matches.length !== 1) {
+        throw new Error(`APK must contain exactly one ${density} ${name} resource`);
+      }
+      const generated = readGeneratedIcon(density, name);
+      const packaged = readArchiveEntry(matches[0]);
+      const expectedHash = createHash('sha256').update(generated).digest('hex');
+      const actualHash = createHash('sha256').update(packaged).digest('hex');
+      if (actualHash !== expectedHash) {
+        throw new Error(`Packaged ${density} ${name} does not match the generated official icon`);
+      }
+    }
+  }
+  return true;
+}
+
 function run(program, args, env = process.env) {
   const result = spawnSync(program, args, { encoding: 'utf8', env });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${path.basename(program)} validation failed`);
+  }
+  return result.stdout;
+}
+
+function runBytes(program, args, env = process.env) {
+  const result = spawnSync(program, args, { env });
   if (result.error || result.status !== 0) {
     throw new Error(`${path.basename(program)} validation failed`);
   }
@@ -59,7 +109,14 @@ export function verifyAndroidApk(apkPath, versionCode, {
   ], { ...process.env, ANDROID_KEYSTORE_PASSWORD: keystorePassword });
   validateSigningFingerprint(certificate, signature);
   const badging = run(path.join(buildTools, 'aapt'), ['dump', 'badging', absoluteApk]);
+  const resources = run(path.join(buildTools, 'aapt'), ['dump', 'resources', absoluteApk]);
   const entries = run('unzip', ['-Z1', absoluteApk]);
+  validateAndroidApkIcons(resources);
+  validateAndroidApkIconPayloads(
+    entries,
+    (entry) => runBytes('unzip', ['-p', absoluteApk, entry]),
+    (density, name) => readFileSync(path.join('src-tauri/gen/android/app/src/main/res', `mipmap-${density}`, name)),
+  );
   return validateAndroidApkMetadata({ badging, entries, versionCode });
 }
 

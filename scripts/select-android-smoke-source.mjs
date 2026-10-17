@@ -5,12 +5,13 @@ export const V0_2_2_SOURCE_SHA = '3edd2b1191f5f7bbd56cf2d35dd401bb61489f10';
 
 const behaviorPaths = [
   /^src\//,
+  /^public\//,
   /^index\.html$/,
   /^package(?:-lock)?\.json$/,
   /^vite\.config\.js$/,
   /^client\.config\.json$/,
   /^src-tauri\//,
-  /^scripts\/(?:prepare-android|generate-client-config|download-bridge|link-bridge)\.(?:mjs|js)$/,
+  /^scripts\/(?:prepare-android|generate-client-config|prepare-assets|android-icons|download-bridge|link-bridge)\.(?:mjs|js)$/,
 ];
 
 export function selectAndroidSmokeSource({ eventName, requestedSource = 'baseline', changedPaths = [] }) {

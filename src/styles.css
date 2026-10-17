@@ -25,17 +25,11 @@ body {
 }
 
 .mark {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
+  display: block;
+  width: 72px;
+  height: 72px;
   margin: 0 auto 22px;
-  border: 1px solid #52657e;
-  border-radius: 18px;
-  color: #d1fae5;
-  background: #1f3440;
-  font-size: 26px;
-  font-weight: 700;
+  object-fit: contain;
 }
 
 .eyebrow { color: #9ca3af; font-size: 11px; letter-spacing: .18em; }

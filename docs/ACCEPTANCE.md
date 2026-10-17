@@ -2,6 +2,11 @@
 
 ## GitHub Actions 构建
 
+- [ ] 官方 Open WebUI 图标已统一接入连接页、Tauri Windows/macOS 图标和 Android launcher/adaptive/splash 资源；最终包内图标内容校验待当前源码的 Windows/macOS/Android CI 结果确认。
+- [ ] Redmi K70 Pro / HyperOS 3 的启动后约 10 秒内退出问题仍未定位。诊断 run #1 ([39002189585](https://github.com/Mike666wq/open-webui-client/actions/runs/39002189585)) 在 apksigner 路径检查失败；run #2 ([39002664958](https://github.com/Mike666wq/open-webui-client/actions/runs/39002664958)) 在模拟器启动前因 Android SDK 工具使用 JDK 11 而失败。提交 591b8fdec0100494fb70ee9873aeffb764c4ff30 已在 setup-android 前安装 Temurin JDK 25。run #3 ([39005472690](https://github.com/Mike666wq/open-webui-client/actions/runs/39005472690)) 已正确选择 v0.2.2 基线 SHA 3edd2b1191f5f7bbd56cf2d35dd401bb61489f10，正在构建诊断 APK；尚无运行时结论。
+- [ ] 新版 **Build desktop and Android packages** 的 `candidate` 模式会以固定 keystore 签名当前 main 的 ARM64 APK，使用 `1000 + github.run_number` versionCode，保留三天且不递增 app 版本、不创建 tag/Release。API 29/36 emulator gate 通过后可下载 Actions candidate artifact，在 Redmi 上覆盖安装同固定签名的旧版；模拟器结果不得记为 Redmi 真机通过。
+- [ ] 后续需记录 candidate 下载、覆盖安装和 Redmi 启动结果；若候选仍在 10 秒内退出，保留设备型号、Android 版本、候选 source SHA、versionCode 和过滤后的诊断日志，再决定修复方向。
+
 - [x] 历史阶段四基线 push run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source/output SHA `9effd627031d985395e650bf17933a38e8e56dcd`：Node tests 20/20、版本一致性、Rust 格式、JDK 25 临时 PKCS#12 生成 smoke test 通过；Windows NSIS、macOS ARM64 ad-hoc DMG/Rust tests 12/12 和 Android debug 检查通过。
 - [x] main 修复 push run [#51](https://github.com/Mike666wq/open-webui-client/actions/runs/38995797837)，SHA `260acae8fe9100dfb752506118513f8f6d2712af`：Node tests 33/33、0 skipped，版本一致性、JDK 25 临时 keystore smoke test、Rust 格式和受限旧分支清理均通过。
 - [x] 首次 main 手动发版 run [#52](https://github.com/Mike666wq/open-webui-client/actions/runs/38995899635)：两项 signing secrets 与 PKCS#12/alias 检查通过；自动 patch bump 到 `0.2.2`，并固定三端源码 SHA `3edd2b1191f5f7bbd56cf2d35dd401bb61489f10`，Android versionCode 为 `1052`。

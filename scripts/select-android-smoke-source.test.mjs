@@ -28,12 +28,15 @@ test('Tauri source and Android resource changes select the current checkout', ()
 test('runtime and Android build changes select the current checkout', () => {
   for (const changedPath of [
     'src/app.js',
+    'public/app-icon.png',
     'src-tauri/src/lib.rs',
     'src-tauri/plugins/connection-controls/android/src/main/java/ConnectionControlsPlugin.kt',
     'src-tauri/capabilities/local-shell.json',
     'src-tauri/build.rs',
     'src-tauri/tauri.conf.json',
     'scripts/prepare-android.mjs',
+    'scripts/prepare-assets.mjs',
+    'scripts/android-icons.mjs',
     'scripts/download-bridge.js',
     'scripts/link-bridge.js',
     'package-lock.json',

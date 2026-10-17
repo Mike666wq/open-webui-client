@@ -9,3 +9,5 @@ src-tauri/gen/android/tauri.properties
 *.keystore
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
