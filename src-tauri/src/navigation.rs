@@ -8,8 +8,13 @@ use tauri_plugin_opener::OpenerExt;
 use crate::connection::{self, parse_external_url};
 
 pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
+    let download_bridge = include_str!("../../scripts/download-bridge.js");
+    let link_bridge = include_str!("../../scripts/link-bridge.js");
+    let init_script = format!(
+        "if (window.top === window.self) {{\n{download_bridge}\n{link_bridge}\n}}"
+    );
     Builder::new("client-navigation")
-        .js_init_script(include_str!("../../scripts/link-bridge.js"))
+        .js_init_script(init_script)
         .on_navigation(move |webview: &Webview<R>, url: &Url| {
             if connection::is_local_entry(url) || connection::is_dev_entry(url) {
                 connection::on_local_navigation(webview, url);

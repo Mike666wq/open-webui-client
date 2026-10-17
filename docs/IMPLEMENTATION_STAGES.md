@@ -14,9 +14,17 @@ Android 原生系统返回在远程服务页面直接返回本地设置页，在
 
 Android 允许应用连接任意明文 HTTP 服务，因此网络安全配置的 cleartext base policy 覆盖所有 host；HTTPS 仍按系统 WebView 的默认信任验证。macOS 只配置 `NSAllowsLocalNetworking`，不关闭 WKWebView 的广泛 ATS 限制。按 Apple 文档，该键覆盖 IP 地址、未限定域名和 `.local` 域名，但不放行任意公网 DNS 域名的 HTTP；macOS 14+ 默认限制 IP 直连，设置此键后仍可连接 IP 地址。该系统例外未按私网地址段作限制，故不能承诺只允许私网 IP。公网域名 HTTP 可能被 ATS 拒绝，HTTPS 需符合 ATS/TLS 与平台证书信任要求。HTTP 明文流量应限制在可信网络中。
 
-阶段二代码已进入实现，但本次修改后的 GitHub Actions 构建和真实设备验收仍待完成。源码实现、CI 构建成功和设备验收是三个不同状态，不相互替代。
+阶段二的源码已通过 GitHub Actions quality、Windows x64、macOS ARM64（含 5 项 Rust library tests）和 Android ARM64 debug 编译检查。CI 通过不替代 Windows/macOS/Android 真机验收；这些设备验收仍待完成。
+
+## 阶段三：Android 文档保存桥
+
+阶段三将 Android 系统保存选择器接入 app-owned Rust 保存命令。远程 WebView 只能调用受限的 Rust 命令；它不能直接调用 native plugin 的 picker、传入 URI 或访问 Kotlin stream。Rust 在每个保存阶段检查当前连接 generation 和 session token，状态失效时取消尚未提交的 transfer。finish 在有效 session 下原子接受 `Finishing` 状态时就是提交点；提交点之后导航失效不会把成功的 native finish 改报失败，已接受的提交允许完成。Kotlin 只接收文件名、MIME type、可选预期字节数、transfer ID、块序号和 Base64 数据；SAF URI 与输出流只留在 native plugin 内。
+
+保存通过 `ACTION_CREATE_DOCUMENT` 让用户选择目标 provider。文件按顺序写入，单块解码后最多 128 KiB，单次 transfer 最多 2 GiB；若提供 `expectedBytes`，完成前必须精确匹配。Picker 等待 10 分钟后标记为过期；之后返回的 URI 会按 stale transfer 清理。Picker 取消返回明确的 cancelled 状态。finish 会校验、flush 并关闭；cancel、写入失败、尚未提交的连接失效和 Activity 销毁会关闭流并尝试删除未完成文档。系统 provider 可能拒绝删除，native 层会返回清理错误；设备与 provider 的实际行为需记录，不承诺每种 provider 都能删除已创建的空文档。
+
+本阶段源码实现与 CI 验证正在进行。GitHub Actions Android debug 编译只证明代码可构建，不证明 SAF picker、URI provider、取消竞态或大文件写入已在设备上验收。
 
 ## 后续阶段
 
-- 阶段三：完成 Windows、macOS 与 Android 真机验收，记录系统、设备、应用版本和连接结果；据此修复兼容性问题。
+- 后续验收：完成 Windows、macOS 与 Android 真机验收，记录系统、设备、应用版本和连接结果；Android 还需验证 SAF 选择、取消、写入、连接切换与 provider 清理行为。
 - 后续评估：正式桌面签名与 macOS 公证、应用商店分发、后台通知和自动更新。上述功能当前未实现。

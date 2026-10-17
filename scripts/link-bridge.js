@@ -17,14 +17,39 @@
     const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null;
     if (!anchor) return;
     const target = new URL(anchor.href, window.location.href);
-    if (anchor.target === '_blank' || target.origin !== window.location.origin) {
+    if (target.origin !== window.location.origin) {
       event.preventDefault();
       event.stopImmediatePropagation();
       open(target.href);
+    } else if (
+      anchor.target === '_blank' &&
+      (['http:', 'https:'].includes(target.protocol) || target.protocol === 'blob:') &&
+      target.origin === window.location.origin &&
+      !target.username &&
+      !target.password
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.location.href = target.href;
     }
   }, true);
 
   window.open = (value) => {
+    try {
+      if (window.__OWC_DOWNLOAD_BRIDGE__?.open(String(value)) === true) return null;
+    } catch {}
+    try {
+      const url = new URL(String(value), window.location.href);
+      if (
+        (['http:', 'https:'].includes(url.protocol) || (url.protocol === 'blob:' && url.origin === window.location.origin)) &&
+        url.origin === window.location.origin &&
+        !url.username &&
+        !url.password
+      ) {
+        window.location.href = url.href;
+        return null;
+      }
+    } catch {}
     open(String(value));
     return null;
   };

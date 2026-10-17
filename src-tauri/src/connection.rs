@@ -141,6 +141,7 @@ impl ConnectionManager {
 
 pub fn return_to_settings(app: &AppHandle, manager: &ConnectionManager) {
     manager.invalidate_for_settings(true);
+    crate::save::invalidate_transfers(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.navigate(settings_url());
     }
@@ -318,7 +319,7 @@ fn persist_last_success(app: &AppHandle, url: &Url) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -340,7 +341,7 @@ fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result
 }
 
 #[cfg(not(windows))]
-fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     fs::rename(from, to)
 }
 
@@ -353,6 +354,7 @@ pub fn get_connection_state(
     let local_origin = is_local_entry(&webview.url().map_err(|error| error.to_string())?);
     if local_origin {
         manager.invalidate_for_settings(false);
+        crate::save::invalidate_transfers(webview.app_handle());
     }
     Ok(manager.status())
 }
@@ -367,13 +369,18 @@ pub fn connect_service(
     ensure_local_webview(&webview)?;
     let url = validate_service_url(&address)?;
     let attempt = manager.begin(url.clone());
+    crate::save::invalidate_transfers(&app);
     let origin_pattern = format!("{}/*", origin_string(&url));
     let capability = CapabilityBuilder::new(format!("remote-session-{}", attempt.generation))
         .window("main")
         .local(false)
         .remote(origin_pattern)
         .permission("allow-connection-ready")
-        .permission("allow-open-external");
+        .permission("allow-open-external")
+        .permission("allow-save-begin")
+        .permission("allow-save-write-chunk")
+        .permission("allow-save-finish")
+        .permission("allow-save-cancel");
     app.add_capability(capability)
         .map_err(|error| format!("Could not authorize this server session: {error}"))?;
     webview
@@ -386,6 +393,7 @@ pub fn connect_service(
     thread::spawn(move || {
         thread::sleep(CONNECTION_TIMEOUT);
         if manager_for_timeout.timeout(generation) {
+            crate::save::invalidate_transfers(&app_for_timeout);
             if let Some(window) = app_for_timeout.get_webview_window("main") {
                 let _ = window.navigate(settings_url());
             }
@@ -460,6 +468,31 @@ pub(crate) fn require_current_session(
     Ok(current)
 }
 
+/// Validate a remote session and run a short synchronous state transition while the
+/// connection generation is still locked. Use this when accepting a save operation so
+/// invalidation cannot slip between the session check and transfer-state transition.
+pub(crate) fn with_current_session<T>(
+    webview: &Webview,
+    manager: &ConnectionManager,
+    generation: u64,
+    session_token: &str,
+    action: impl FnOnce(&Url) -> Result<T, String>,
+) -> Result<T, String> {
+    if webview.label() != "main" {
+        return Err("This connection is not available in this webview.".into());
+    }
+    let current = webview.url().map_err(|error| error.to_string())?;
+    let current_origin = current.origin().ascii_serialization();
+    let state = manager
+        .0
+        .lock()
+        .map_err(|_| "Connection state is unavailable.")?;
+    if !state.authorizes(generation, &current_origin, session_token) {
+        return Err("This server session is no longer active.".into());
+    }
+    action(&current)
+}
+
 pub fn on_page_load<R: Runtime>(webview: &Webview<R>, url: &Url) {
     let Ok(current) = webview.url() else { return };
     let Some(manager) = webview.try_state::<ConnectionManager>() else {
@@ -513,6 +546,7 @@ pub fn on_local_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) {
         if let Some(manager) = webview.try_state::<ConnectionManager>() {
             manager.invalidate_for_settings(false);
         }
+        crate::save::invalidate_transfers(webview.app_handle());
     }
 }
 
