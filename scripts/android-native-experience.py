@@ -70,6 +70,24 @@ def tap(label, **kwargs):
     tap_node(find(label, **kwargs))
 
 
+def tap_any(labels, *, timeout=20):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for node in nodes('picker-controls'):
+            if node.get('text') in labels or node.get('content-desc') in labels:
+                tap_node(node)
+                return
+        time.sleep(1)
+    raise AssertionError('UNVERIFIED: picker controls unavailable: ' + ', '.join(labels))
+
+
+def save_to_downloads():
+    tap_any(['Show roots', 'Show navigation drawer', 'Open navigation drawer'])
+    tap_any(['Downloads', 'Download'])
+    tap_any(['SAVE', 'Save'])
+    time.sleep(2)
+
+
 def enter(node, text):
     tap_node(node)
     shell('input keyevent KEYCODE_MOVE_END')
@@ -162,6 +180,8 @@ try:
     hidden = 'FULLSCREEN' in app_dump or any(
         int(value, 16) & 4 for value in re.findall(r'(?:mSystemUiVisibility|sysui)=(?:0x)?([0-9a-fA-F]+)', app_dump)
     ) or bool(re.search(r'(?:requestedVisibleTypes|Requested visible types|mRequestedVisibleTypes).*navigationBars(?![^\n]*statusBars)', app_dump, re.I))
+    requested_masks = re.findall(r'mRequestedVisibleTypes=(0x[0-9a-fA-F]+|[0-9]+)\b', app_dump)
+    hidden = hidden or any(int(value, 0) & 1 == 0 for value in requested_masks)
     assert hidden, 'UNVERIFIED: unable to prove the app requests hidden status bars'
     screenshot('connected-portrait')
 
@@ -229,9 +249,19 @@ try:
     screenshot('diagnostics-picker')
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
     find('Fixture header 8766'); find('Client menu')
+    menu(); tap('Export Android diagnostics'); time.sleep(2)
+    save_to_downloads()
+    report = shell('cat /sdcard/Download/android-diagnostics.txt')
+    assert report and '127.0.0.1' not in report and 'http://' not in report, 'Diagnostic privacy regression'
+    tap('Download fixture'); time.sleep(2)
+    shell('input keyevent KEYCODE_BACK'); time.sleep(2)
+    find('Client menu')
+    tap('Download fixture'); time.sleep(2)
+    save_to_downloads()
+    assert shell('cat /sdcard/Download/fixture.txt').strip() == 'fixture-download', 'Downloaded payload changed'
     screenshot('native-experience-pass')
     window_evidence('final')
-    (OUT / 'native-experience-result.txt').write_text('PASS: native menu, immersive request, fixture bridge denial, non-destructive settings, keyboard, drag, Back, rotation, switch, timeout recovery, reload and SAF cancellation.\n', encoding='utf-8')
+    (OUT / 'native-experience-result.txt').write_text('PASS: native menu, immersive request, fixture bridge denial, non-destructive settings, keyboard, drag, Back, rotation, switch, timeout recovery, reload and SAF diagnostic/download save and cancellation.\n', encoding='utf-8')
     print('ANDROID_NATIVE_EXPERIENCE_PASS')
 finally:
     for server in SERVERS:

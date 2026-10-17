@@ -68,10 +68,10 @@ pub(crate) fn install(app: &AppHandle) {
                                     && candidate.as_deref()
                                         == Some(url.origin().ascii_serialization().as_str()) => {}
                             Ok(_) => {
-                                if let Some(window) = app.get_webview("main") {
+                                if let Some(window) = app.get_webview_window("main") {
                                     if connection::start_connection(
                                         app.clone(),
-                                        window,
+                                        window.as_ref().clone(),
                                         manager.inner().clone(),
                                         address,
                                     )
@@ -95,7 +95,7 @@ pub(crate) fn install(app: &AppHandle) {
                         let (current, phase, _, _, _) = manager.native_snapshot();
                         if current == generation && phase == "connected" {
                             crate::save::invalidate_transfers(&app);
-                            if let Some(webview) = app.get_webview("main") {
+                            if let Some(webview) = app.get_webview_window("main") {
                                 let _ = webview.reload();
                             }
                         }

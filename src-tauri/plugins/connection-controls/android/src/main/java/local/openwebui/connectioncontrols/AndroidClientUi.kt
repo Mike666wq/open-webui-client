@@ -2,6 +2,9 @@ package local.openwebui.connectioncontrols
 
 import android.app.Activity
 import android.graphics.Color
+import android.graphics.Point
+import android.graphics.Rect
+import android.os.Build
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -124,10 +127,18 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
         val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
         val rootLocation = IntArray(2); root.getLocationOnScreen(rootLocation)
-        val decor = activity.window.decorView
-        val decorLocation = IntArray(2); decor.getLocationOnScreen(decorLocation)
-        val windowBottom = decorLocation[1] + decor.height
-        val overlap = ClientPolicy.bottomOverlap(rootLocation[1] + root.height, windowBottom, max(ime.bottom, nav.bottom))
+        // WindowMetrics ignores IME resizing. decor.height may already be resized,
+        // so using it as the original window height would deduct the IME twice.
+        val windowBottom = if (Build.VERSION.SDK_INT >= 30) activity.windowManager.currentWindowMetrics.bounds.bottom
+            else Point().also { @Suppress("DEPRECATION") activity.windowManager.defaultDisplay.getRealSize(it) }.y
+        val rootBottom = rootLocation[1] + root.height
+        val keyboardOverlap = if (Build.VERSION.SDK_INT >= 30) {
+            ClientPolicy.bottomOverlap(rootBottom, windowBottom, ime.bottom)
+        } else {
+            val visible = Rect(); root.getWindowVisibleDisplayFrame(visible)
+            (rootBottom - visible.bottom).coerceAtLeast(0)
+        }
+        val overlap = max(keyboardOverlap, ClientPolicy.bottomOverlap(rootBottom, windowBottom, nav.bottom))
         val left = max(cutout.left, nav.left)
         val right = max(cutout.right, nav.right)
         val top = (cutout.top - rootLocation[1]).coerceAtLeast(0)
