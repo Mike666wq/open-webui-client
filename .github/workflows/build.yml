@@ -14,6 +14,11 @@ on:
         options:
           - candidate
           - release
+      skip_emulator:
+        description: Skip hosted Android emulator checks when runner infrastructure is unavailable; validate the signed package on a physical device
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -275,7 +280,7 @@ jobs:
 
   release-emulator-smoke:
     needs: [prepare-release, release-quality]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && inputs.skip_emulator != true }}
     uses: ./.github/workflows/android-emulator-diagnose.yml
     with:
       source_sha: ${{ needs.prepare-release.outputs.commit_sha }}
@@ -651,7 +656,7 @@ jobs:
 
   publish-release:
     needs: [prepare-release, release-quality, windows, macos, android, release-emulator-smoke]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && (needs.release-emulator-smoke.result == 'success' || inputs.skip_emulator == true) }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
