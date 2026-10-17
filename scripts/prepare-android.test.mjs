@@ -22,6 +22,7 @@ test('Gradle release signing reads secrets from environment and stays idempotent
     defaultConfig {
         minSdk = 29
         targetSdk = 37
+        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         manifestPlaceholders["usesCleartextTraffic"] = "false"
     }
     buildTypes {
@@ -36,10 +37,18 @@ test('Gradle release signing reads secrets from environment and stays idempotent
   assert.match(once, /compileSdk = 36/);
   assert.match(once, /targetSdk = 36/);
   assert.match(once, /minSdk = 29/);
+  assert.match(once, /versionCode = tauriProperties\.getProperty\("tauri\.android\.versionCode", "1"\)\.toInt\(\)/);
   assert.match(once, /ANDROID_KEYSTORE_PATH/);
   assert.match(once, /if \(System\.getenv\("ANDROID_KEYSTORE_PATH"\) != null\)/);
   assert.equal((once.match(/manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"false"/g) ?? []).length, 2);
   assert.match(once, /signingConfig = signingConfigs\.getByName\("release"\)/);
   assert.match(once, /isMinifyEnabled = false/);
   assert.equal(updateGradle(once), once);
+
+  const release = updateGradle(once, 1042);
+  assert.match(release, /versionCode = 1042/);
+  assert.equal(updateGradle(release, 1042), release);
+  assert.throws(() => updateGradle(release, 1043), /unexpected Android defaultConfig versionCode/);
+  assert.throws(() => updateGradle(once, 1000), /between 1001 and 2100000000/);
+  assert.throws(() => updateGradle(once, 2_100_000_001), /between 1001 and 2100000000/);
 });

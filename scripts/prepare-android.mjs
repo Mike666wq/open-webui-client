@@ -6,6 +6,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..');
 const androidRoot = path.join(projectRoot, 'src-tauri', 'gen', 'android');
 const ANDROID_SDK_LEVEL = 36;
+const MIN_RELEASE_VERSION_CODE = 1001;
+const MAX_RELEASE_VERSION_CODE = 2_100_000_000;
 
 export const networkSecurityConfigXml = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
@@ -35,7 +37,33 @@ export function updateManifest(source) {
   return result;
 }
 
-export function updateGradle(source) {
+function parseReleaseVersionCode(value) {
+  const versionCode = Number(value);
+  if (!Number.isSafeInteger(versionCode) || versionCode < MIN_RELEASE_VERSION_CODE || versionCode > MAX_RELEASE_VERSION_CODE) {
+    throw new Error(`Release versionCode must be an integer between ${MIN_RELEASE_VERSION_CODE} and ${MAX_RELEASE_VERSION_CODE}`);
+  }
+  return versionCode;
+}
+
+function updateReleaseVersionCode(source, value) {
+  const versionCode = parseReleaseVersionCode(value);
+  const assignments = [...source.matchAll(/^(\s*)versionCode\s*=\s*(.*?)\s*$/gm)];
+  if (assignments.length !== 1) {
+    throw new Error('Expected exactly one Android defaultConfig versionCode assignment');
+  }
+
+  const [line] = assignments[0];
+  const indentation = assignments[0][1];
+  const current = assignments[0][2];
+  const template = 'tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()';
+  if (current === String(versionCode)) return source;
+  if (current !== template) {
+    throw new Error('Refusing to replace an unexpected Android defaultConfig versionCode');
+  }
+  return source.replace(line, `${indentation}versionCode = ${versionCode}`);
+}
+
+export function updateGradle(source, releaseVersionCode = null) {
   if (!source.includes('android {')) throw new Error('app/build.gradle.kts has no android block');
   const requiredEnv = `            storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: throw GradleException("ANDROID_KEYSTORE_PATH is required"))
             storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: throw GradleException("ANDROID_KEYSTORE_PASSWORD is required")
@@ -71,6 +99,10 @@ ${requiredEnv}
     throw new Error('Could not add release signing configuration before buildTypes');
   }
 
+  if (releaseVersionCode != null) {
+    result = updateReleaseVersionCode(result, releaseVersionCode);
+  }
+
   if (!/signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/.test(result)) {
     const releaseBlock = /(buildTypes\s*\{[\s\S]*?getByName\("release"\)\s*\{)/;
     if (!releaseBlock.test(result)) throw new Error('Could not find the generated release build type in app/build.gradle.kts');
@@ -79,12 +111,17 @@ ${requiredEnv}
   return result;
 }
 
-export async function prepareAndroidProject(root = projectRoot) {
+export async function prepareAndroidProject(root = projectRoot, { env = process.env } = {}) {
+  const releaseVersionCode = env.ANDROID_RELEASE_VERSION_CODE ?? null;
+  const keystorePath = env.ANDROID_KEYSTORE_PATH ?? null;
+  if ((releaseVersionCode == null) !== (keystorePath == null)) {
+    throw new Error('ANDROID_RELEASE_VERSION_CODE and ANDROID_KEYSTORE_PATH must be set together for a signed release');
+  }
   const mainDir = path.join(root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main');
   const manifestPath = path.join(mainDir, 'AndroidManifest.xml');
   const gradlePath = path.join(root, 'src-tauri', 'gen', 'android', 'app', 'build.gradle.kts');
   const manifest = updateManifest(await readFile(manifestPath, 'utf8'));
-  const gradle = updateGradle(await readFile(gradlePath, 'utf8'));
+  const gradle = updateGradle(await readFile(gradlePath, 'utf8'), releaseVersionCode);
   await writeFile(manifestPath, manifest);
   await writeFile(gradlePath, gradle);
   const resourceDir = path.join(mainDir, 'res', 'xml');

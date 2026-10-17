@@ -114,6 +114,24 @@ jobs:
         run: npm ci
       - name: Run Node tests
         run: npm test
+      - name: Check synchronized app version
+        run: npm run version:check
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Smoke-test protected Android keystore generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 32)"
+          export ANDROID_KEYSTORE_BASE64=''
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/keystore-smoke.XXXXXX")"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          node scripts/generate-android-keystore.mjs "$smoke_dir"
+          test -s "$smoke_dir/openwebui-client.p12"
+          test -s "$smoke_dir/keystore-fingerprint.txt"
+          echo "Temporary Android keystore generation and certificate fingerprint passed."
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
@@ -269,7 +287,7 @@ jobs:
 
   android:
     needs: prepare-lockfile
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.targets == 'android' || inputs.targets == 'all') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.targets == 'android' || inputs.targets == 'all') }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -315,10 +333,27 @@ jobs:
           for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!name}" ]; then echo "Required Android signing secret is missing: ${name}" >&2; exit 1; fi
           done
+          if [ "$KEY_ALIAS" != "openwebui-client" ]; then
+            echo "ANDROID_KEY_ALIAS must be openwebui-client." >&2
+            exit 1
+          fi
+          if [ "$KEY_PASSWORD" != "$KEYSTORE_PASSWORD" ]; then
+            echo "ANDROID_KEY_PASSWORD must match ANDROID_KEYSTORE_PASSWORD for this PKCS#12 keystore." >&2
+            exit 1
+          fi
+      - name: Calculate Android release version code
+        id: release-version
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { versionCodeFromRunNumber } from './scripts/manage-version.mjs';
+
+          const versionCode = versionCodeFromRunNumber(Number(process.env.GITHUB_RUN_NUMBER));
+          appendFileSync(process.env.GITHUB_OUTPUT, `version_code=${versionCode}\n`);
+          appendFileSync(process.env.GITHUB_ENV, `ANDROID_VERSION_CODE=${versionCode}\nANDROID_RELEASE_VERSION_CODE=${versionCode}\n`);
+          NODE
       - name: Initialize Android project
         run: npm run tauri -- android init --ci
-      - name: Prepare Android manifest and release signing
-        run: node scripts/prepare-android.mjs
       - name: Decode release keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -327,6 +362,8 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/android-signing/release.keystore"
           test -s "$RUNNER_TEMP/android-signing/release.keystore"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/android-signing/release.keystore" >> "$GITHUB_ENV"
+      - name: Prepare Android manifest and release signing
+        run: node scripts/prepare-android.mjs
       - name: Build signed ARM64 APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -342,9 +379,16 @@ jobs:
           files=(src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk)
           test "${#files[@]}" -eq 1 || { echo "Expected one ARM64 release APK, found ${#files[@]}" >&2; printf '%s\n' "${files[@]}"; exit 1; }
           mkdir -p artifacts
-          cp "${files[0]}" "artifacts/Open-WebUI-Client-${version}-android-arm64.apk"
+          artifact="Open-WebUI-Client-${version}-android-arm64-vc${ANDROID_VERSION_CODE}.apk"
+          cp "${files[0]}" "artifacts/${artifact}"
+          {
+            echo "## Signed Android release artifact"
+            echo "- App version: ${version}"
+            echo "- Android versionCode: ${ANDROID_VERSION_CODE}"
+            echo "- Artifact: ${artifact}"
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: Open-WebUI-Client-android-arm64
-          path: artifacts/Open-WebUI-Client-*-android-arm64.apk
+          name: Open-WebUI-Client-android-arm64-vc${{ steps.release-version.outputs.version_code }}
+          path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
           if-no-files-found: error
