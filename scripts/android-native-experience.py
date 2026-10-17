@@ -17,6 +17,8 @@ ARGS = PARSER.parse_args()
 OUT = Path(ARGS.output)
 OUT.mkdir(parents=True, exist_ok=True)
 COUNT = 0
+SNAPSHOTS = {}
+SNAPSHOT_LOCK = threading.Lock()
 
 
 def adb(*args, check=True):
@@ -40,14 +42,40 @@ def nodes(label='ui'):
             root = ET.fromstring(data[data.index('<hierarchy'):])
             safe_label = re.sub(r'[^A-Za-z0-9_.-]', '-', label)
             (OUT / f'{COUNT:03}-{safe_label}.xml').write_text(data, encoding='utf-8')
-            return list(root.iter('node'))
+            result = list(root.iter('node'))
+            # Stock WebView accessibility can omit its virtual DOM after navigation.
+            # The test service reports ONLY its own synthetic DOM geometry/state.
+            # Real adb taps/keys still drive both web and native controls; no app
+            # testing API or JS injection into a user's service is introduced.
+            webviews = [n for n in result if n.get('class', '') == 'android.webkit.WebView']
+            with SNAPSHOT_LOCK:
+                snapshot = max(SNAPSHOTS.values(), key=lambda item: item['received'], default=None)
+                if snapshot is not None:
+                    snapshot = dict(snapshot)
+            if webviews and snapshot and time.monotonic() - snapshot['received'] < 2:
+                view = bounds(webviews[0])
+                scale = (view[2] - view[0]) / snapshot['width']
+                for entry in snapshot['entries']:
+                    label, rect = entry['label'], entry['rect']
+                    if rect[3] <= 0 or rect[1] >= snapshot['height']:
+                        continue
+                    physical = [int(view[0] + rect[0]*scale), int(view[1] + rect[1]*scale),
+                                int(view[0] + rect[2]*scale), int(view[1] + rect[3]*scale)]
+                    synthetic = ET.Element('node', {
+                        'text': entry.get('text', label), 'content-desc': label,
+                        'class': 'fixture-owned-dom-report',
+                        'bounds': f'[{physical[0]},{physical[1]}][{physical[2]},{physical[3]}]',
+                    })
+                    result.append(synthetic)
+                (OUT / 'fixture-state.json').write_text(json.dumps(snapshot), encoding='utf-8')
+            return result
         except (ValueError, ET.ParseError):
             time.sleep(1)
     raise AssertionError('UNVERIFIED: Android native hierarchy unavailable')
 
 
 def bounds(node):
-    values = list(map(int, re.findall(r'\d+', node.get('bounds', ''))))
+    values = list(map(int, re.findall(r'-?\d+', node.get('bounds', ''))))
     assert len(values) == 4, 'UNVERIFIED: control bounds unavailable'
     return values
 
@@ -130,6 +158,18 @@ class Fixture(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def do_POST(self):
+        if self.path != '/__fixture_state':
+            self.send_error(404)
+            return
+        length = min(int(self.headers.get('Content-Length', '0')), 65536)
+        state = json.loads(self.rfile.read(length))
+        state['received'] = time.monotonic()
+        with SNAPSHOT_LOCK:
+            SNAPSHOTS[self.server.server_port] = state
+        self.send_response(204)
+        self.end_headers()
+
     def do_GET(self):
         port = self.server.server_port
         if self.path == '/api/config':
@@ -139,13 +179,31 @@ class Fixture(BaseHTTPRequestHandler):
             # Data and page nonce prove cancellation does not reload or rebuild.
             body = f'''<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{{margin:0;background:#161616;color:white;font:18px sans-serif}}header{{padding:12px}} textarea{{display:block;width:90%;height:80px;font-size:18px}}button,a{{display:block;padding:14px;margin:8px}}main{{height:1300px}}footer{{position:fixed;bottom:0;background:#333;width:100%;height:44px}}</style>
-<header>Fixture header {port}</header><textarea aria-label="Draft">draft-kept</textarea>
-<button onclick="history.pushState({{}},'', '/next');document.querySelector('#route').textContent='Second route'">Next route</button><p id="route">First route</p>
-<button onclick="let a=document.createElement('a');a.download='fixture.txt';a.href=URL.createObjectURL(new Blob(['fixture-download']));a.click()">Download fixture</button>
-<button onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p>
+<header id="fixture-header">Fixture header {port}</header><textarea id="draft" aria-label="Draft">draft-kept</textarea>
+<button id="next-route" onclick="history.pushState({{}},'', '/next');document.querySelector('#route').textContent='Second route'">Next route</button><p id="route">First route</p>
+<button id="download-fixture" onclick="let a=document.createElement('a');a.download='fixture.txt';a.href=URL.createObjectURL(new Blob(['fixture-download']));a.click()">Download fixture</button>
+<button id="probe-native" onclick="window.__TAURI__.core.invoke('plugin:connection-controls|installNativeActions',{{actions:'__CHANNEL__:0'}}).then(()=>document.querySelector('#security').textContent='SECURITY FAILURE',()=>document.querySelector('#security').textContent='Native bridge denied')">Probe native bridge</button><p id="security"></p>
 <output id="scroll-state" style="position:fixed;right:0;top:60px;font-size:10px">Scroll 0</output>
 <script>onpopstate=()=>document.querySelector('#route').textContent=location.pathname==='/next'?'Second route':'First route';onscroll=()=>document.querySelector('#scroll-state').textContent='Scroll '+Math.round(scrollY);</script>
-<main>Page nonce: {time.time_ns()}</main><footer>Fixture bottom</footer>'''.encode()
+<main><span id="page-nonce">Page nonce: {time.time_ns()}</span></main><footer>Fixture bottom</footer>
+<script>
+function reportFixture() {{
+  var entries = [];
+  var selectors = {{'Fixture header {port}':'#fixture-header','Draft':'#draft','Next route':'#next-route',
+    'Download fixture':'#download-fixture','Probe native bridge':'#probe-native'}};
+  Object.keys(selectors).forEach(function(label) {{
+    var element = document.querySelector(selectors[label]); var r = element.getBoundingClientRect();
+    entries.push({{label:label,text:element.value || element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
+  }});
+  ['#route','#security','#scroll-state','#page-nonce'].forEach(function(selector) {{
+    var element = document.querySelector(selector); var r = element.getBoundingClientRect();
+    entries.push({{label:element.textContent,text:element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
+  }});
+  fetch('/__fixture_state', {{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{width:innerWidth,height:innerHeight,entries:entries}})}}).catch(function(){{}});
+}}
+setInterval(reportFixture, 250); reportFixture();
+</script>'''.encode()
             kind = 'text/html; charset=utf-8'
         self.send_response(200)
         self.send_header('Content-Type', kind)

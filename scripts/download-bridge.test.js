@@ -435,3 +435,26 @@ test('file-saver 2.0.5 captures the preload shim before its Mac WebKit FileReade
   assert.equal(harness.invokes[0].args.mimeType, 'text/plain');
   assert.equal(digest(writeBytes(harness)), digest(Buffer.from('macOS WebKit export')));
 });
+
+
+test('legacy Android Blob chunks use FileReader when arrayBuffer is absent', { timeout: 5000 }, async () => {
+  const harness = createHarness();
+  const original = 'legacy WebView payload';
+  const blob = new Blob([original], { type: 'text/plain' });
+  const slice = blob.slice.bind(blob);
+  blob.slice = (...args) => {
+    const part = slice(...args);
+    Object.defineProperty(part, 'arrayBuffer', { value: undefined });
+    return part;
+  };
+  harness.context.FileReader = class {
+    readAsArrayBuffer(part) {
+      Blob.prototype.arrayBuffer.call(part).then((value) => { this.result = value; this.onload(); }, () => this.onerror());
+    }
+  };
+  const href = harness.window.URL.createObjectURL(blob);
+  harness.makeAnchor(href, { download: 'legacy.txt', hasDownload: true }).click();
+  await waitForCommand(harness, 'save-finish');
+  assert.equal(writeBytes(harness).toString(), original);
+  assert.equal(harness.alerts.length, 0);
+});

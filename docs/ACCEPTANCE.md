@@ -94,3 +94,11 @@ Chinese Android locales use Chinese client labels; other locales fall back to En
 
 A green emulator gate does not claim HyperOS physical-device UX acceptance. Release can
 proceed after the GitHub gates, as requested, with that limitation stated in release notes.
+
+
+The synthetic test service reports its own current DOM bounds/draft/scroll nonce to the
+runner because stock WebView accessibility may omit virtual children after navigation.
+Native controls still use real UIAutomator nodes and all interaction uses actual ADB
+taps/keys. Fixture reports are accepted only while a visible WebView is present and the
+report is fresh; raw hierarchy, fixture state and screenshots remain separate evidence.
+No production debug API or script injection into a user's service is added.
