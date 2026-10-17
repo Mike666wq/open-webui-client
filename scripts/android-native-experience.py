@@ -225,6 +225,14 @@ for PORT in (8765, 8766, 8767):
 
 try:
     shell('settings put secure show_ime_with_hard_keyboard 1')
+    overlay_list = shell('cmd overlay list')
+    available = re.findall(r'com\.android\.internal\.display\.cutout\.emulation\.[a-z]+', overlay_list)
+    cutout_overlay = next((item for item in available if item.endswith('.tall')), None)
+    if cutout_overlay is None:
+        cutout_overlay = next((item for item in available if item.endswith('.corner')), None)
+    assert cutout_overlay, 'UNVERIFIED: no cutout emulation overlay available'
+    shell(f'cmd overlay enable {cutout_overlay}')
+    time.sleep(3)
     shell(f'pm clear {PACKAGE}')
     shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
     deadline = time.monotonic() + 30
@@ -320,20 +328,10 @@ try:
     shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
     find('Fixture header 8765')
 
-    # Exercise a real emulated cutout, not a hard-coded top padding assumption.
-    overlay_list = shell('cmd overlay list')
-    available = re.findall(r'com\.android\.internal\.display\.cutout\.emulation\.[a-z]+', overlay_list)
-    cutout_overlay = next((item for item in available if item.endswith('.tall')), None)
-    if cutout_overlay is None:
-        cutout_overlay = next((item for item in available if item.endswith('.corner')), None)
-    assert cutout_overlay, 'UNVERIFIED: no cutout emulation overlay available'
-    shell(f'cmd overlay enable {cutout_overlay}')
-    time.sleep(3)
-    find('Client menu')
+    # The cutout is configured before launch: toggling an overlay at runtime
+    # changes Android asset paths and recreates the Tauri Activity/WebView.
     assert bounds(find('Fixture header 8765'))[1] > 0, 'Header entered emulated cutout'
     screenshot('display-cutout')
-    shell(f'cmd overlay disable {cutout_overlay}')
-    time.sleep(3)
 
     # Rotate without introducing remote CSS or destroying the client chrome.
     shell('settings put system accelerometer_rotation 0')
