@@ -1,0 +1,56 @@
+name: Dispatch an Android candidate for main changes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build.yml
+      - .github/workflows/android-emulator-diagnose.yml
+      - src/**
+      - src-tauri/**
+      - scripts/**
+      - public/**
+      - index.html
+      - package.json
+      - package-lock.json
+      - vite.config.*
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: android-candidate-relay-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-candidate:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify triggering SHA is still main and dispatch candidate mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GH_REPO}/commits/main" --jq '.sha')"
+          if [ "$current_main" != "$EVENT_SHA" ]; then
+            echo "Main advanced after this push; refusing to dispatch a candidate from a stale event."
+            exit 1
+          fi
+          gh api --silent --method POST \
+            "repos/${GH_REPO}/actions/workflows/build.yml/dispatches" \
+            --input - <<'JSON'
+          {"ref":"main","inputs":{"mode":"candidate"}}
+          JSON
+          {
+            echo "## Android candidate dispatch"
+            echo "- Verified main SHA: ${EVENT_SHA}"
+            echo "- Requested fixed workflow: build.yml"
+            echo "- Requested mode: candidate (no version bump, tag, or Release)"
+          } >> "$GITHUB_STEP_SUMMARY"

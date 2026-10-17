@@ -543,9 +543,6 @@ jobs:
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Initialize Android project
         run: npm run tauri -- android init --ci
-      - name: Run Android connection-controls unit tests
-        working-directory: src-tauri/gen/android
-        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -578,6 +575,10 @@ jobs:
           artifact="Open-WebUI-Client-${version}-android-arm64-vc${ANDROID_VERSION_CODE}.apk"
           cp "${files[0]}" "artifacts/${artifact}"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+      - name: Run Android connection-controls unit tests
+        id: android-plugin-tests
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Verify signature and Android package metadata
         id: verify-release-apk
         env:
@@ -597,16 +598,16 @@ jobs:
           if [ "${{ steps.verify-release-apk.outcome }}" = "success" ]; then
             echo "The signed APK passed package verification. It remains internal until all release gates succeed." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "The signed APK was retained as an internal UNVERIFIED artifact after package verification failed. It cannot enter a Release." >> "$GITHUB_STEP_SUMMARY"
+            echo "The signed APK was retained as an internal UNVERIFIED artifact because Android unit or package validation failed or did not complete. It cannot enter a Release." >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v4
-        if: steps.release-apk-staged.outcome == 'success' && steps.verify-release-apk.outcome == 'success'
+        if: steps.release-apk-staged.outcome == 'success' && steps.android-plugin-tests.outcome == 'success' && steps.verify-release-apk.outcome == 'success'
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-vc${{ needs.prepare-release.outputs.version_code }}
           path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
-        if: always() && steps.release-apk-staged.outcome == 'success' && steps.verify-release-apk.outcome != 'success'
+        if: always() && steps.release-apk-staged.outcome == 'success' && (steps.android-plugin-tests.outcome != 'success' || steps.verify-release-apk.outcome != 'success')
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
           path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
@@ -667,9 +668,6 @@ jobs:
           echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
       - name: Initialize Android project
         run: npm run tauri -- android init --ci
-      - name: Run Android connection-controls unit tests
-        working-directory: src-tauri/gen/android
-        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Decode the existing release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -702,7 +700,7 @@ jobs:
           artifact="Open-WebUI-Client-${version}-candidate-android-arm64-vc${ANDROID_VERSION_CODE}-run${GITHUB_RUN_NUMBER}.apk"
           cp "${apks[0]}" "artifacts/${artifact}"
           cat > artifacts/README.txt <<EOF
-          UNVERIFIED TEST CANDIDATE
+          PACKAGE CHECKS PENDING
 
           App version: ${version}
           Android versionCode: ${ANDROID_VERSION_CODE}
@@ -712,8 +710,8 @@ jobs:
           API 29 evidence artifact: android-emulator-evidence-api-29-${GITHUB_RUN_ID}
           API 36 evidence artifact: android-emulator-evidence-api-36-${GITHUB_RUN_ID}
 
-          This is a test-only signed APK, not a Release. Check the Android package-verification step before installing it.
-          Emulator status is separate. Inspect candidate-emulator-smoke and its API 29 and API 36 evidence artifacts; this file does not assert that smoke testing passed.
+          This is a test-only signed APK, not a Release. Do not install it if the workflow marks it UNVERIFIED.
+          Real-device acceptance is pending. Emulator status is separate; inspect candidate-emulator-smoke and its API 29 and API 36 evidence artifacts.
           EOF
           echo "version=$version" >> "$GITHUB_OUTPUT"
           {
@@ -724,6 +722,10 @@ jobs:
             echo "- Source: ${{ needs.prepare-lockfile.outputs.source_sha }}"
             echo "- Package checks and API 29/36 emulator smoke are separate gates; see their steps and evidence artifacts."
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Run Android connection-controls unit tests
+        id: android-plugin-tests
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Verify signature, official icons and Android metadata
         id: verify-candidate-apk
         env:
@@ -739,10 +741,12 @@ jobs:
         if: always() && steps.candidate-metadata.outcome == 'success'
         shell: bash
         run: |
-          if [ "${{ steps.verify-candidate-apk.outcome }}" = "success" ]; then
-            echo "The candidate passed signature, metadata and icon checks. It is still a test-only package; emulator status is reported separately." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.android-plugin-tests.outcome }}" = "success" ] && [ "${{ steps.verify-candidate-apk.outcome }}" = "success" ]; then
+            sed -i '1c\CANDIDATE PACKAGE CHECKS PASSED' artifacts/README.txt
+            echo "The candidate passed Android unit, signature, metadata and icon checks. Physical-device acceptance remains pending; emulator status is separate." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "The built APK is retained as an internal UNVERIFIED artifact after package validation failed. Do not install or distribute it." >> "$GITHUB_STEP_SUMMARY"
+            sed -i '1c\UNVERIFIED CANDIDATE — DO NOT INSTALL' artifacts/README.txt
+            echo "The built APK is retained as an internal UNVERIFIED artifact because Android unit or package validation failed or did not complete. Do not install or distribute it." >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v4
         if: always() && steps.candidate-metadata.outcome == 'success'

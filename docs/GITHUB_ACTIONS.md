@@ -4,7 +4,7 @@
 
 在仓库 **Actions → Build desktop and Android packages → Run workflow** 中选择 `main` 和运行模式。`release` 会先验证两项 Android signing secrets，然后将 stable semver patch 递增并通过 GitHub API non-force 地提交到 `main`。这个 run 的 quality 与 Windows、macOS、Android jobs 都 checkout 同一新提交 SHA。Windows x64 生成含离线 WebView2 Runtime 的 NSIS installer；macOS ARM64 生成 ad-hoc DMG 并运行 Rust library tests；Android 生成签名 ARM64 release APK。API 29 和 36 模拟器启动检查通过后，三端构建都成功才创建不可移动的版本 tag、上传三个包和 `SHA256SUMS` 并公开 GitHub Release。未全部成功时不会公开 Release。手动 run 不会创建 PAT，也不运行自动更新。
 
-`candidate` 模式用于先在 Android 真机验证当前 `main`。它不修改应用语义版本、不创建 tag/Release，构建受两项现有 secrets 签名的 ARM64 APK，versionCode 为 `1000 + github.run_number`，Actions artifact 保留三天。APK 构建与 emulator 检查相互独立；后置包验证失败时仍保留明确标记为 UNVERIFIED 的内部 artifact。candidate 不发布到 Release。使用步骤：
+`candidate` 模式用于先在 Android 真机验证当前 `main`。它不修改应用语义版本、不创建 tag/Release，构建受两项现有 secrets 签名的 ARM64 APK，versionCode 为 `1000 + github.run_number`，Actions artifact 保留三天。APK 构建与 emulator 检查相互独立；后置包验证失败时仍保留明确标记为 UNVERIFIED 的内部 artifact。candidate 不发布到 Release。触及 app 或构建 workflow 的 main push 会自动触发一次固定的 candidate workflow_dispatch；这是开发候选便捷触发，不会启动正式发布。也可手动运行：
 
 1. 在 **Actions → Build desktop and Android packages → Run workflow** 选择 `main` 和 `candidate`，等待 `candidate-quality` 与 `android-candidate` 完成；emulator 检查独立运行并单独查看 API 29/36 状态。emulator 基础设施失败不会阻止 APK artifact，但不能记作模拟器或真机通过。
 2. 打开这次 workflow run，查看 Android package verification 结果和 artifact 内 README，再下载名称以 `Open-WebUI-Client-candidate-` 开头的 artifact。若 README 或 run 标记 UNVERIFIED、或包验证失败，不要安装或分发。只有验证成功的固定签名 APK 才可在相同签名身份的 Redmi 上覆盖安装（例如 `adb install -r <候选APK路径>`），无需卸载旧 app。

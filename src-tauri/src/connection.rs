@@ -51,6 +51,20 @@ struct PersistedConnection {
     last_success_url: String,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum PageLoadAction {
+    Handshake {
+        generation: u64,
+        nonce: String,
+        expected_origin: String,
+    },
+    RestoreSession {
+        generation: u64,
+        token: String,
+        expected_origin: String,
+    },
+}
+
 impl ConnectionManager {
     pub fn load(app: &AppHandle) -> Self {
         let last_success = load_last_success(app);
@@ -213,6 +227,42 @@ impl ConnectionRuntime {
                 .candidate
                 .as_ref()
                 .is_some_and(|candidate| candidate.origin().ascii_serialization() == origin)
+    }
+
+    fn page_load_action(&self, loaded_url: &Url) -> Option<PageLoadAction> {
+        let candidate = self.candidate.as_ref()?;
+        if candidate.origin() != loaded_url.origin() {
+            return None;
+        }
+        let expected_origin = origin_string(candidate);
+        if self.ready {
+            let token = self.session_token.clone()?;
+            Some(PageLoadAction::RestoreSession {
+                generation: self.generation,
+                token,
+                expected_origin,
+            })
+        } else {
+            let nonce = self.ready_nonce.clone()?;
+            Some(PageLoadAction::Handshake {
+                generation: self.generation,
+                nonce,
+                expected_origin,
+            })
+        }
+    }
+
+    fn allows_service_navigation(&self, target: &Url) -> bool {
+        // Navigation callbacks run on Android's WebView main looper, so their policy
+        // must use the active candidate instead of synchronously asking the WebView
+        // for its current URL. Only the main window receives this capability.
+        self.candidate.as_ref().is_some_and(|candidate| {
+            (self.ready || self.ready_nonce.is_some()) && candidate.origin() == target.origin()
+        })
+    }
+
+    fn has_active_service_session(&self) -> bool {
+        self.ready && self.candidate.is_some()
     }
 
     fn return_to_settings(&mut self, manual: bool) {
@@ -494,47 +544,44 @@ pub(crate) fn with_current_session<T>(
 }
 
 pub fn on_page_load<R: Runtime>(webview: &Webview<R>, url: &Url) {
-    let Ok(current) = webview.url() else { return };
+    // Wry invokes this callback from Android's WebView main looper. Its synchronous
+    // `url()` call waits on that same looper and can time out before the queued reply.
+    if webview.label() != "main" {
+        return;
+    }
     let Some(manager) = webview.try_state::<ConnectionManager>() else {
         return;
     };
-    enum LoadAction {
-        Handshake(u64, String, String),
-        RestoreSession(u64, String, String),
-    }
     let action = {
-        let state = manager.0.lock().expect("connection state poisoned");
-        let Some(candidate) = state.candidate.as_ref() else {
+        let Ok(state) = manager.0.lock() else {
             return;
         };
-        if candidate.origin() != current.origin() || url.origin() != current.origin() {
+        let Some(action) = state.page_load_action(url) else {
             return;
-        }
-        if state.ready {
-            let Some(token) = state.session_token.clone() else {
-                return;
-            };
-            LoadAction::RestoreSession(state.generation, token, origin_string(candidate))
-        } else {
-            let Some(nonce) = state.ready_nonce.clone() else {
-                return;
-            };
-            LoadAction::Handshake(state.generation, nonce, origin_string(candidate))
-        }
+        };
+        action
     };
     let script = match action {
-        LoadAction::Handshake(generation, nonce, expected_origin) => {
+        PageLoadAction::Handshake {
+            generation,
+            nonce,
+            expected_origin,
+        } => {
             let origin = serde_json::to_string(&expected_origin).expect("origin string serializes");
             let nonce = serde_json::to_string(&nonce).expect("nonce serializes");
             format!(
                 "(async()=>{{try{{if(location.origin!=={origin})return;const r=await fetch('/api/config',{{credentials:'omit',cache:'no-store',redirect:'error'}});if(!r.ok)return;const d=await r.json();if(!d||d.status!==true)return;await window.__TAURI__.core.invoke('connection-ready',{{generation:{generation},nonce:{nonce}}});}}catch{{}}}})();"
             )
         }
-        LoadAction::RestoreSession(generation, token, expected_origin) => {
+        PageLoadAction::RestoreSession {
+            generation,
+            token,
+            expected_origin,
+        } => {
             let origin = serde_json::to_string(&expected_origin).expect("origin string serializes");
             let token = serde_json::to_string(&token).expect("session token serializes");
             format!(
-                "if(location.origin==={origin})window.__OWC_SESSION__={{generation:{generation},token:{token}}};"
+                "if(location.origin==={origin}){{const s=window.__OWC_SESSION__;if(!s||s.generation<={generation})window.__OWC_SESSION__={{generation:{generation},token:{token}}};}}"
             )
         }
     };
@@ -586,33 +633,31 @@ pub fn is_dev_entry(url: &Url) -> bool {
 }
 
 pub fn is_current_service_origin<R: Runtime>(webview: &Webview<R>, target: &Url) -> bool {
-    let Ok(current) = webview.url() else {
+    if webview.label() != "main" {
         return false;
-    };
+    }
     let Some(manager) = webview.try_state::<ConnectionManager>() else {
         return false;
     };
-    let state = manager.0.lock().expect("connection state poisoned");
-    state.candidate.as_ref().is_some_and(|candidate| {
-        (state.ready || state.ready_nonce.is_some())
-            && candidate.origin() == target.origin()
-            && (is_local_entry(&current) || current.origin() == candidate.origin())
-    })
+    manager
+        .0
+        .lock()
+        .map(|state| state.allows_service_navigation(target))
+        .unwrap_or(false)
 }
 
 pub fn has_active_service_session<R: Runtime>(webview: &Webview<R>) -> bool {
-    let Ok(current) = webview.url() else {
+    if webview.label() != "main" {
         return false;
-    };
+    }
     let Some(manager) = webview.try_state::<ConnectionManager>() else {
         return false;
     };
-    let state = manager.0.lock().expect("connection state poisoned");
-    state.ready
-        && state
-            .candidate
-            .as_ref()
-            .is_some_and(|candidate| candidate.origin() == current.origin())
+    manager
+        .0
+        .lock()
+        .map(|state| state.has_active_service_session())
+        .unwrap_or(false)
 }
 
 pub fn parse_external_url(value: &str) -> Result<Url, String> {
@@ -672,6 +717,59 @@ mod tests {
             origin_string(&url("http://localhost:3000")),
             "http://localhost:3000"
         );
+    }
+
+    #[test]
+    fn page_load_action_uses_payload_origin_and_current_generation() {
+        let mut state = ConnectionRuntime::new(None);
+        let first_url = url("http://first.example.org");
+        let first = state.begin(first_url.clone());
+        assert_eq!(
+            state.page_load_action(&first_url),
+            Some(PageLoadAction::Handshake {
+                generation: first.generation,
+                nonce: first.nonce.clone(),
+                expected_origin: "http://first.example.org".into(),
+            })
+        );
+
+        let next_url = url("https://next.example.org");
+        let next = state.begin(next_url.clone());
+        assert_eq!(state.page_load_action(&first_url), None);
+        assert_eq!(
+            state.page_load_action(&next_url),
+            Some(PageLoadAction::Handshake {
+                generation: next.generation,
+                nonce: next.nonce.clone(),
+                expected_origin: "https://next.example.org".into(),
+            })
+        );
+        assert!(
+            state
+                .validate_ready(first.generation, &first.nonce, "http://first.example.org")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn navigation_callbacks_use_only_the_active_candidate_and_session_state() {
+        let mut state = ConnectionRuntime::new(None);
+        let candidate = url("https://chat.example.org");
+        let attempt = state.begin(candidate.clone());
+
+        assert!(state.allows_service_navigation(&candidate));
+        assert!(!state.allows_service_navigation(&url("https://other.example.org")));
+        assert!(!state.has_active_service_session());
+
+        state.ready_nonce = None;
+        state.ready = true;
+        assert!(state.allows_service_navigation(&candidate));
+        assert!(state.has_active_service_session());
+
+        state.return_to_settings(true);
+        assert!(!state.allows_service_navigation(&candidate));
+        assert!(!state.has_active_service_session());
+        assert_ne!(state.generation, attempt.generation);
     }
 
     #[test]

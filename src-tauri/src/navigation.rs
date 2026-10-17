@@ -27,10 +27,21 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
             if connection::has_active_service_session(webview)
                 && let Ok(external) = parse_external_url(url.as_str())
             {
-                let _ = webview
-                    .app_handle()
-                    .opener()
-                    .open_url(external.as_str(), None::<&str>);
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                {
+                    let app = webview.app_handle().clone();
+                    let url = external.to_string();
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        let _ = app.opener().open_url(url, None::<&str>);
+                    });
+                }
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    let _ = webview
+                        .app_handle()
+                        .opener()
+                        .open_url(external.as_str(), None::<&str>);
+                }
             }
             false
         })

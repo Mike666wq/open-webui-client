@@ -200,6 +200,9 @@ jobs:
         run: |
           node scripts/prepare-android.mjs
           npm run tauri -- android build --apk --target x86_64
+      - name: Run Android connection-controls unit tests
+        working-directory: app-source/src-tauri/gen/android
+        run: ./gradlew :connection-controls:testDebugUnitTest
       - name: Verify and collect only the diagnostic APK
         working-directory: app-source
         shell: bash
