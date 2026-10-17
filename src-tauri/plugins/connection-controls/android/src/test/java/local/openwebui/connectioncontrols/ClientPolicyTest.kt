@@ -20,6 +20,7 @@ class ClientPolicyTest {
     @Test fun historyMustStayOnCurrentServerOrigin() {
         assertTrue(ClientPolicy.sameOrigin("https://chat.example/a", "https://chat.example"))
         assertTrue(ClientPolicy.sameOrigin("https://chat.example:443/a", "https://CHAT.example"))
+        assertTrue(ClientPolicy.sameOrigin("HTTPS://chat.example/a", "https://chat.example"))
         assertFalse(ClientPolicy.sameOrigin("http://tauri.localhost", "https://chat.example"))
         assertFalse(ClientPolicy.sameOrigin("https://old.example", "https://chat.example"))
         assertFalse(ClientPolicy.sameOrigin("https://user:pass@chat.example", "https://chat.example"))

@@ -88,7 +88,7 @@ def find(label, *, timeout=20):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for node in nodes(label.replace(' ', '-')[:30]):
-            if label in (node.get('text'), node.get('content-desc')):
+            if label.casefold() in (node.get('text', '').casefold(), node.get('content-desc', '').casefold()):
                 return node
         time.sleep(1)
     raise AssertionError(f'UNVERIFIED: missing control {label}')
@@ -194,7 +194,7 @@ class Fixture(BaseHTTPRequestHandler):
 function reportFixture() {{
   var entries = [];
   var selectors = {{'Fixture header {port}':'#fixture-header','Draft':'#draft','Next route':'#next-route',
-    'Download fixture':'#download-fixture','Probe native bridge':'#probe-native'}};
+    'Download fixture':'#download-fixture','Probe native bridge':'#probe-native','Fixture bottom':'footer'}};
   Object.keys(selectors).forEach(function(label) {{
     var element = document.querySelector(selectors[label]); var r = element.getBoundingClientRect();
     entries.push({{label:label,text:element.value || element.textContent,rect:[r.left,r.top,r.right,r.bottom]}});
@@ -224,6 +224,7 @@ for PORT in (8765, 8766, 8767):
     adb('reverse', f'tcp:{PORT}', f'tcp:{PORT}')
 
 try:
+    shell('settings put secure show_ime_with_hard_keyboard 1')
     shell(f'pm clear {PACKAGE}')
     shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
     deadline = time.monotonic() + 30
@@ -257,6 +258,11 @@ try:
     hidden = hidden or any(value.strip() == 'statusBars' for value in non_default)
     assert hidden, 'UNVERIFIED: unable to prove the app requests hidden status bars'
     screenshot('connected-portrait')
+    header_before = bounds(find('Fixture header 8765'))
+    shell('input swipe 400 0 400 260 350')
+    screenshot('transient-status-bar')
+    assert bounds(find('Fixture header 8765')) == header_before, 'Transient status bar moved the document'
+    time.sleep(4)
 
     tap('Probe native bridge'); find('Native bridge denied')
     shell('input swipe 150 700 150 300 600'); time.sleep(1)
@@ -287,6 +293,7 @@ try:
     keyboard_top = min(bounds(n)[1] for n in keyboard_nodes if bounds(n)[3] > bounds(n)[1])
     assert bounds(draft)[3] <= keyboard_top, 'Draft covered by keyboard'
     assert bounds(button)[3] <= keyboard_top, 'Menu covered by keyboard'
+    assert bounds(find('Fixture bottom'))[3] <= keyboard_top, 'Bottom composer covered by keyboard'
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
     assert abs(bounds(find('Client menu'))[1] - drag_y) <= 4, 'Keyboard overwrote saved menu position'
 

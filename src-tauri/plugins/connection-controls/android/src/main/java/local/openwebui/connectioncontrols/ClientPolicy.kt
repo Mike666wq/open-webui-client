@@ -14,9 +14,9 @@ internal object ClientPolicy {
 
     fun sameOrigin(left: String?, right: String?): Boolean = try {
         val a = URI(left ?: ""); val b = URI(right ?: "")
-        fun port(uri: URI) = if (uri.port >= 0) uri.port else if (uri.scheme == "https") 443 else 80
+        fun port(uri: URI) = if (uri.port >= 0) uri.port else if (uri.scheme.equals("https", true)) 443 else 80
         a.host != null && b.host != null && a.userInfo == null && b.userInfo == null &&
-            a.scheme in listOf("http", "https") && a.scheme.equals(b.scheme, true) &&
+            a.scheme?.lowercase(java.util.Locale.ROOT) in listOf("http", "https") && a.scheme.equals(b.scheme, true) &&
             a.host.equals(b.host, true) && port(a) == port(b)
     } catch (_: Exception) { false }
 }

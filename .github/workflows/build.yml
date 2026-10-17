@@ -66,6 +66,8 @@ jobs:
           cache: npm
       - name: Install frontend dependencies
         run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
       - name: Run Node tests
         run: npm test
       - name: Check synchronized app version
@@ -241,6 +243,8 @@ jobs:
           cache: npm
       - name: Install frontend dependencies
         run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
       - name: Run Node tests
         run: npm test
       - name: Check synchronized app version
@@ -295,6 +299,8 @@ jobs:
           cache: npm
       - name: Install frontend dependencies
         run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
       - name: Run Node tests
         run: npm test
       - name: Check synchronized app version
