@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 name: Build desktop and Android packages
 
 on:
@@ -835,3 +834,440 @@ jobs:
           RELEASE_ARTIFACT_DIR: release-inputs
         run: node scripts/release-orchestrator.mjs publish
 
+--- C:\Users\bbben\Desktop\openweb-ui\open-webui-client\.github\workflows\android-emulator-diagnose.yml contents: ---
+[Reading 432 lines from start (total: 432 lines, 0 remaining)]
+
+name: Android emulator startup diagnosis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/android-emulator-diagnose.yml'
+      - 'scripts/android-emulator-smoke.py'
+      - 'scripts/select-android-smoke-source.mjs'
+      - 'scripts/select-android-smoke-source.test.mjs'
+      - 'scripts/download-bridge.js'
+      - 'scripts/link-bridge.js'
+      - 'scripts/prepare-assets.mjs'
+      - 'scripts/android-icons.mjs'
+      - 'public/**'
+      - 'src/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.js'
+      - 'client.config.json'
+      - 'src-tauri/**'
+      - 'scripts/prepare-android.mjs'
+      - 'scripts/generate-client-config.mjs'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: App source to diagnose
+        required: true
+        type: choice
+        default: baseline
+        options:
+          - baseline
+          - current
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Immutable source SHA for the Android emulator smoke test
+        required: true
+        type: string
+      source_label:
+        description: Human-readable source label for evidence
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-emulator-diagnose-${{ github.run_id }}-${{ inputs.source_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 22.22.0
+  RUST_VERSION: 1.94.0
+  ANDROID_NDK_VERSION: 28.2.13676358
+  ANDROID_SMOKE_BASELINE_SHA: 3edd2b1191f5f7bbd56cf2d35dd401bb61489f10
+
+jobs:
+  choose-source:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-22.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      source_kind: ${{ steps.source.outputs.source_kind }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Select pinned baseline or current app source
+        id: source
+        env:
+          ANDROID_SMOKE_REQUESTED_SOURCE: ${{ inputs.source || 'baseline' }}
+          ANDROID_SMOKE_PINNED_SOURCE_SHA: ${{ inputs.source_sha || '' }}
+          ANDROID_SMOKE_SOURCE_LABEL: ${{ inputs.source_label || '' }}
+          ANDROID_SMOKE_BEFORE: ${{ github.event.before }}
+          ANDROID_SMOKE_SHA: ${{ github.sha }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
+            selected="$ANDROID_SMOKE_PINNED_SOURCE_SHA"
+            if [[ ! "$selected" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "workflow_call requires a 40-character immutable commit SHA." >&2
+              exit 1
+            fi
+            if [[ ! "$ANDROID_SMOKE_SOURCE_LABEL" =~ ^[a-z0-9-]{1,40}$ ]]; then
+              echo "workflow_call source label is invalid." >&2
+              exit 1
+            fi
+            echo "source_sha=$selected" >> "$GITHUB_OUTPUT"
+            echo "source_kind=$ANDROID_SMOKE_SOURCE_LABEL" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ -z "$ANDROID_SMOKE_BEFORE" ] || [[ "$ANDROID_SMOKE_BEFORE" =~ ^0+$ ]]; then
+              echo "Push event has no usable before SHA; refusing to guess the app source." >&2
+              exit 1
+            fi
+            changed_json="$(git diff --name-only "$ANDROID_SMOKE_BEFORE" "$ANDROID_SMOKE_SHA" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split(/\r?\n/).filter(Boolean))))')"
+          else
+            changed_json='[]'
+          fi
+          selected="$(ANDROID_SMOKE_CHANGED_PATHS="$changed_json" ANDROID_SMOKE_SOURCE="$ANDROID_SMOKE_REQUESTED_SOURCE" node scripts/select-android-smoke-source.mjs | sed -n 's/^source=//p')"
+          if [ "$selected" = "current" ]; then
+            echo "source_sha=$ANDROID_SMOKE_SHA" >> "$GITHUB_OUTPUT"
+            echo "source_kind=current" >> "$GITHUB_OUTPUT"
+          elif [ "$selected" = "$ANDROID_SMOKE_BASELINE_SHA" ]; then
+            echo "source_sha=$ANDROID_SMOKE_BASELINE_SHA" >> "$GITHUB_OUTPUT"
+            echo "source_kind=v0.2.2-baseline" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unexpected selected source: $selected" >&2
+            exit 1
+          fi
+          echo "Selected $selected for event $GITHUB_EVENT_NAME; workflow checkout remains $ANDROID_SMOKE_SHA."
+
+  build-x86_64-test-apk:
+    needs: choose-source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.choose-source.outputs.source_sha }}
+          path: app-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: app-source/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install pinned Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app-source/src-tauri -> target
+          cache-on-failure: true
+      - name: Install locked frontend dependencies
+        working-directory: app-source
+        run: npm ci
+      - name: Fetch locked Rust dependencies
+        working-directory: app-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+      - name: Initialize Android project
+        working-directory: app-source
+        run: npm run tauri -- android init --ci
+      - name: Create runner-local throwaway release keystore
+        id: signing
+        working-directory: app-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/android-emulator-diagnostic.p12"
+          password="$(openssl rand -hex 32)"
+          version_code=$((1000 + GITHUB_RUN_NUMBER))
+          if [ "$version_code" -gt 2100000000 ]; then
+            echo "Diagnostic versionCode exceeds Android's supported maximum." >&2
+            exit 1
+          fi
+          echo "::add-mask::$password"
+          export ANDROID_SMOKE_KEY_PASSWORD="$password"
+          keytool -genkeypair -noprompt -keystore "$keystore" -storetype PKCS12 \
+            -alias openwebui-client -keyalg RSA -keysize 3072 -validity 2 \
+            -dname "CN=Temporary Android Emulator Diagnostic" \
+            -storepass:env ANDROID_SMOKE_KEY_PASSWORD -keypass:env ANDROID_SMOKE_KEY_PASSWORD >/dev/null 2>&1
+          test -s "$keystore"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$keystore"
+            echo "ANDROID_KEYSTORE_PASSWORD=$password"
+            echo "ANDROID_KEY_ALIAS=openwebui-client"
+            echo "ANDROID_KEY_PASSWORD=$password"
+            echo "ANDROID_RELEASE_VERSION_CODE=$version_code"
+            echo "ANDROID_SMOKE_VERSION_CODE=$version_code"
+          } >> "$GITHUB_ENV"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+      - name: Prepare and build release-profile x86_64 diagnostic APK
+        id: android-apk-build
+        working-directory: app-source
+        run: |
+          node scripts/prepare-android.mjs
+          npm run tauri -- android build --apk --target x86_64
+      - name: Run Android connection-controls unit tests
+        working-directory: app-source/src-tauri/gen/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          projects="$(./gradlew projects --console=plain)"
+          printf '%s\n' "$projects"
+          mapfile -t plugin_projects < <(printf '%s\n' "$projects" | sed -nE "s/.*Project '(:[^']*connection[-_]controls[^']*)'.*/\1/p" | sort -u)
+          if [ "${#plugin_projects[@]}" -ne 1 ]; then
+            echo "Expected one generated Gradle project for connection-controls; matching paths were: ${plugin_projects[*]:-(none)}" >&2
+            exit 1
+          fi
+          ./gradlew "${plugin_projects[0]}:testDebugUnitTest" --console=plain
+      - name: Verify and collect only the diagnostic APK
+        if: always() && steps.android-apk-build.outcome == 'success'
+        working-directory: app-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*release*')
+          test "${#apks[@]}" -eq 1 || { echo "Expected one release APK, found ${#apks[@]}" >&2; exit 1; }
+          apk="${apks[0]}"
+          apkanalyzer manifest application-id "$apk" | grep -Fx 'local.openwebui.client'
+          apkanalyzer manifest version-code "$apk" | grep -Fx "$ANDROID_SMOKE_VERSION_CODE"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
+          unzip -l "$apk" | grep -q 'lib/x86_64/'
+          mkdir -p "$RUNNER_TEMP/android-diagnostic-apk"
+          cp "$apk" "$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk"
+          {
+            echo "## Android emulator diagnostic build"
+            echo "- App source: ${{ needs.choose-source.outputs.source_kind }} (${{ needs.choose-source.outputs.source_sha }})"
+            echo "- Version code: $ANDROID_SMOKE_VERSION_CODE"
+            echo "- Package: local.openwebui.client"
+            echo "- Signing key: temporary, generated for this runner job and not retained"
+            echo "- APK: test-only artifact; not a release asset"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-diagnostic-apk-${{ github.run_id }}
+          path: ${{ runner.temp }}/android-diagnostic-apk/diagnostic-x86_64.apk
+          retention-days: 1
+          if-no-files-found: error
+
+  emulator-smoke:
+    needs: [choose-source, build-x86_64-test-apk]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 36]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools emulator
+      - name: Add Android emulator binary to PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$ANDROID_HOME/emulator/emulator"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+      - name: Install x86_64 Google APIs image
+        run: sdkmanager "system-images;android-${{ matrix.api }};google_apis;x86_64"
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-emulator-diagnostic-apk-${{ github.run_id }}
+          path: ${{ runner.temp }}/android-diagnostic-apk
+      - name: Enable KVM access on the ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo chmod 0666 /dev/kvm
+          ls -l /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Create and boot API ${{ matrix.api }} x86_64 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 420))
+          emulator_pid=''
+          boot_success=0
+          evidence="$RUNNER_TEMP/android-emulator-evidence"
+          mkdir -p "$evidence"
+          capture_boot_failure() {
+            if [ -f "$RUNNER_TEMP/emulator.log" ]; then
+              tail -300 "$RUNNER_TEMP/emulator.log" > "$evidence/emulator-startup.log" || true
+            fi
+            timeout 10s avdmanager list avd > "$evidence/avd-list.txt" 2>&1 || true
+            timeout 10s adb devices -l > "$evidence/adb-devices.txt" 2>&1 || true
+            timeout 10s adb logcat -b crash -d -t 500 > "$evidence/emulator-crash-logcat.txt" 2>&1 || true
+            echo "Boot diagnostics saved to the always-uploaded evidence artifact." >&2
+          }
+          stop_emulator() {
+            if [ -n "$emulator_pid" ] && kill -0 "$emulator_pid" 2>/dev/null; then
+              kill -TERM "$emulator_pid" 2>/dev/null || true
+              for _ in {1..10}; do
+                kill -0 "$emulator_pid" 2>/dev/null || break
+                sleep 1
+              done
+              if kill -0 "$emulator_pid" 2>/dev/null; then
+                kill -KILL "$emulator_pid" 2>/dev/null || true
+              fi
+              wait "$emulator_pid" 2>/dev/null || true
+            fi
+          }
+          on_exit() {
+            local status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ] && [ "$boot_success" -ne 1 ]; then
+              capture_boot_failure
+              stop_emulator
+            fi
+            exit "$status"
+          }
+          trap on_exit EXIT
+
+          avd_home="$RUNNER_TEMP/android-avd"
+          mkdir -p "$avd_home"
+          export ANDROID_AVD_HOME="$avd_home"
+          echo "ANDROID_AVD_HOME=$avd_home" >> "$GITHUB_ENV"
+          printf 'no\n' | timeout --signal=TERM --kill-after=5s 120s avdmanager create avd --force \
+            --name "diagnose-api-${{ matrix.api }}" \
+            --package "system-images;android-${{ matrix.api }};google_apis;x86_64" --device pixel_2
+          avd_name="diagnose-api-${{ matrix.api }}"
+          test -s "$ANDROID_AVD_HOME/$avd_name.ini"
+          test -d "$ANDROID_AVD_HOME/$avd_name.avd"
+          timeout 10s avdmanager list avd > "$evidence/avd-list.txt"
+          grep -F "Name: $avd_name" "$evidence/avd-list.txt"
+          timeout --signal=TERM --kill-after=5s 30s emulator -accel-check
+          nohup emulator -avd "$avd_name" -no-window -no-audio -no-boot-anim \
+            -gpu swiftshader_indirect -accel on > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+          echo "$emulator_pid" > "$RUNNER_TEMP/emulator.pid"
+          timeout 10s adb start-server
+
+          device_ready=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if [ "$(timeout 10s adb get-state 2>/dev/null | tr -d '\r' || true)" = "device" ]; then
+              device_ready=1
+              break
+            fi
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo "Emulator process exited before ADB connected." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          if [ "$device_ready" -ne 1 ]; then
+            echo "Emulator did not connect to ADB within the 420-second startup deadline." >&2
+            exit 1
+          fi
+
+          boot_completed=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if [ "$(timeout 10s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" = "1" ]; then
+              boot_completed=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$boot_completed" -ne 1 ]; then
+            echo "ADB connected, but Android did not complete boot within the 420-second startup deadline." >&2
+            exit 1
+          fi
+
+          timeout 15s adb shell settings put global window_animation_scale 0
+          timeout 15s adb shell settings put global transition_animation_scale 0
+          timeout 15s adb shell settings put global animator_duration_scale 0
+          boot_success=1
+          echo "Android emulator connected and booted successfully before the 420-second deadline."
+      - name: Install APK and run cold-start, idle and lifecycle checks
+        shell: bash
+        env:
+          ANDROID_SMOKE_SOURCE_SHA: ${{ needs.choose-source.outputs.source_sha }}
+          ANDROID_SMOKE_API: ${{ matrix.api }}
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk"
+          test -s "$apk"
+          adb install "$apk"
+          python scripts/android-emulator-smoke.py \
+            --output "$RUNNER_TEMP/android-emulator-evidence" \
+            --api "$ANDROID_SMOKE_API" \
+            --source-sha "$ANDROID_SMOKE_SOURCE_SHA"
+          {
+            echo "## Android emulator runtime result"
+            echo "- App source: ${{ needs.choose-source.outputs.source_kind }} ($ANDROID_SMOKE_SOURCE_SHA)"
+            echo "- API level: $ANDROID_SMOKE_API"
+            echo "- The script records the idle baseline and supplementary interaction result separately."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload filtered diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-evidence-api-${{ matrix.api }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/android-emulator-evidence/
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Stop Android emulator
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          pid_file="$RUNNER_TEMP/emulator.pid"
+          if [ -s "$pid_file" ]; then
+            emulator_pid="$(cat "$pid_file")"
+            if kill -0 "$emulator_pid" 2>/dev/null; then
+              kill -TERM "$emulator_pid" 2>/dev/null || true
+              for _ in {1..10}; do
+                kill -0 "$emulator_pid" 2>/dev/null || exit 0
+                sleep 1
+              done
+              kill -KILL "$emulator_pid" 2>/dev/null || true
+            fi
+          fi
+
+[executed on device: LAPTOP-78V1DCUH (fc230839-6146-40f7-80b4-5e8857adf01e)]
