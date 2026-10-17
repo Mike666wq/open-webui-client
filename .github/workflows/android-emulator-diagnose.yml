@@ -430,5 +430,3 @@ jobs:
               kill -KILL "$emulator_pid" 2>/dev/null || true
             fi
           fi
-
-[executed on device: LAPTOP-78V1DCUH (fc230839-6146-40f7-80b4-5e8857adf01e)]
