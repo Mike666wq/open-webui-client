@@ -396,7 +396,7 @@ pub(crate) fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std:
 }
 
 #[tauri::command(rename = "get-connection-state")]
-pub fn get_connection_state(
+pub async fn get_connection_state(
     webview: Webview,
     manager: State<'_, ConnectionManager>,
 ) -> Result<ConnectionStatus, String> {
@@ -410,7 +410,7 @@ pub fn get_connection_state(
 }
 
 #[tauri::command(rename = "connect-service", rename_all = "camelCase")]
-pub fn connect_service(
+pub async fn connect_service(
     app: AppHandle,
     webview: Webview,
     manager: State<'_, ConnectionManager>,
@@ -453,7 +453,7 @@ pub fn connect_service(
 }
 
 #[tauri::command(rename = "connection-ready", rename_all = "camelCase")]
-pub fn connection_ready(
+pub async fn connection_ready(
     app: AppHandle,
     webview: Webview,
     manager: State<'_, ConnectionManager>,
@@ -484,7 +484,7 @@ pub fn connection_ready(
 }
 
 #[tauri::command(rename = "open-external", rename_all = "camelCase")]
-pub fn open_external(
+pub async fn open_external(
     app: AppHandle,
     webview: Webview,
     manager: State<'_, ConnectionManager>,
