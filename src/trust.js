@@ -1,7 +1,14 @@
 export function validateServiceUrl(value) {
+  const address = String(value).trim();
+  const scheme = /^(https?):\/\//i.exec(address);
+  const authority = scheme && address.slice(scheme[0].length).split(/[\\/?#]/, 1)[0];
+  if (!scheme || !authority || address.includes('\\')) {
+    throw new TypeError('Enter a valid HTTP or HTTPS address.');
+  }
+
   let url;
   try {
-    url = new URL(String(value).trim());
+    url = new URL(address);
   } catch {
     throw new TypeError('Enter a valid HTTP or HTTPS address.');
   }

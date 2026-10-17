@@ -12,6 +12,11 @@ test('service URL accepts HTTP and HTTPS origins with hosts, IPs, and ports', ()
   assert.equal(validateServiceUrl('https://chat.example.org:8443/').origin, 'https://chat.example.org:8443');
   for (const value of [
     'http://user:pass@chat.example.org:3000',
+    'http:///path',
+    'http:/chat.example.org',
+    'http:\\\\chat.example.org',
+    'http://\\chat.example.org',
+    'http://chat.example.org\\path',
     'http://chat.example.org:3000/path',
     'https://chat.example.org:3000/?q=1',
     'http://tauri.localhost/',

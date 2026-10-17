@@ -246,8 +246,19 @@ impl ConnectionRuntime {
 }
 
 pub fn validate_service_url(value: &str) -> Result<Url, String> {
-    let url =
-        Url::parse(value.trim()).map_err(|_| "Enter a valid HTTP or HTTPS address.".to_string())?;
+    let address = value.trim();
+    let invalid_address = || "Enter a valid HTTP or HTTPS address.".to_string();
+    let Some((scheme, remainder)) = address.split_once("://") else {
+        return Err(invalid_address());
+    };
+    let authority_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
+    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        || authority_end == 0
+        || address.contains('\\')
+    {
+        return Err(invalid_address());
+    }
+    let url = Url::parse(address).map_err(|_| invalid_address())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none_or(str::is_empty)
         || url.host_str() == Some("tauri.localhost")
@@ -610,6 +621,11 @@ mod tests {
             "javascript:alert(1)",
             "ftp://example.org",
             "http:///path",
+            "http:/example.org",
+            r"http:\\example.org",
+            r"http://\example.org",
+            r"http://example.org\path",
+            "http://?q=1",
             "http://user:pass@example.org",
             "http://tauri.localhost",
             "http://example.org/path",
