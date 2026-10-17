@@ -263,7 +263,7 @@ jobs:
           test -x "$ANDROID_HOME/emulator/emulator"
           echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
       - name: Install screenshot text recognition for DocumentsUI geometry fallback
-        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr imagemagick
       - name: Install x86_64 Google APIs image
         run: sdkmanager "system-images;android-${{ matrix.api }};google_apis;x86_64"
       - uses: actions/download-artifact@v4

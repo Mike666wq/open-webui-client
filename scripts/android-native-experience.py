@@ -137,7 +137,11 @@ def save_to_downloads():
         assert any(n.get('text') in ('SAVE', 'Save') and n.get('enabled') == 'true'
                    and n.get('package') == 'com.android.documentsui' for n in controls), 'SAVE is not enabled'
         screenshot('save-ocr')
-        ocr = subprocess.run(['tesseract', str(OUT / 'save-ocr.png'), 'stdout', '--psm', '11', 'tsv'],
+        # White text on the blue Material button is missed by sparse OCR on
+        # the original screenshot. Invert luminance for dark text recognition.
+        subprocess.run(['convert', str(OUT / 'save-ocr.png'), '-colorspace', 'Gray', '-negate',
+                        str(OUT / 'save-ocr-inverted.png')], check=True, timeout=30)
+        ocr = subprocess.run(['tesseract', str(OUT / 'save-ocr-inverted.png'), 'stdout', '--psm', '11', 'tsv'],
                              capture_output=True, text=True, check=True, timeout=30).stdout
         (OUT / 'save-ocr.tsv').write_text(ocr, encoding='utf-8')
         matches = [row for row in csv.DictReader(io.StringIO(ocr), delimiter='\t')
