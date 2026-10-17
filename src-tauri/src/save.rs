@@ -4,13 +4,13 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-#[cfg(target_os = "android")]
-use tauri::Wry;
 use tauri::{AppHandle, Manager, Runtime, State, Url, Webview};
 #[cfg(target_os = "android")]
 use tauri_plugin_connection_controls::{
     BeginSaveArgs, ConnectionControlsBridge, TransferArgs, WriteChunkArgs,
 };
+#[cfg(target_os = "android")]
+use tauri::Wry;
 use uuid::Uuid;
 
 use crate::connection::{self, ConnectionManager};
@@ -50,15 +50,16 @@ enum TransferSink {
 impl SaveManager {
     fn insert(&self, id: String, transfer: Transfer) -> Result<(), String> {
         use std::collections::hash_map::Entry;
-        let mut transfers = self.0.lock().map_err(|_| "Save state is unavailable.")?;
+        let mut transfers = self
+            .0
+            .lock()
+            .map_err(|_| "Save state is unavailable.")?;
         match transfers.entry(id) {
             Entry::Vacant(entry) => {
                 entry.insert(transfer);
                 Ok(())
             }
-            Entry::Occupied(_) => {
-                Err("A save transfer with this identifier already exists.".into())
-            }
+            Entry::Occupied(_) => Err("A save transfer with this identifier already exists.".into()),
         }
     }
 
@@ -77,7 +78,10 @@ impl SaveManager {
     }
 
     fn remove_finished(&self, id: &str, owner: &Owner) -> Result<(), String> {
-        let mut transfers = self.0.lock().map_err(|_| "Save state is unavailable.")?;
+        let mut transfers = self
+            .0
+            .lock()
+            .map_err(|_| "Save state is unavailable.")?;
         if transfers
             .get(id)
             .is_some_and(|transfer| transfer.owner == *owner && transfer.finishing)
@@ -97,8 +101,12 @@ pub fn invalidate_transfers<R: Runtime>(app: &AppHandle<R>) {
     let ids = manager.drain();
     #[cfg(target_os = "android")]
     if !ids.is_empty() {
-        let bridge = app.state::<ConnectionControlsBridge<R>>().inner().clone();
+        let bridge = app
+            .state::<ConnectionControlsBridge<R>>()
+            .inner()
+            .clone();
         for transfer_id in ids {
+            let bridge = bridge.clone();
             tauri::async_runtime::spawn(async move {
                 let _ = bridge.save_cancel(TransferArgs { transfer_id }).await;
             });
@@ -114,8 +122,12 @@ fn owner_for(
     generation: u64,
     session_token: &str,
 ) -> Result<Owner, String> {
-    let current =
-        connection::require_current_session(webview, connections, generation, session_token)?;
+    let current = connection::require_current_session(
+        webview,
+        connections,
+        generation,
+        session_token,
+    )?;
     Ok(Owner {
         generation,
         origin: current.origin().ascii_serialization(),
@@ -138,9 +150,13 @@ fn with_current_owner<T>(
     session_token: &str,
     action: impl FnOnce(Owner) -> Result<T, String>,
 ) -> Result<T, String> {
-    connection::with_current_session(webview, connections, generation, session_token, |current| {
-        action(owner_from_url(current, generation, session_token))
-    })
+    connection::with_current_session(
+        webview,
+        connections,
+        generation,
+        session_token,
+        |current| action(owner_from_url(current, generation, session_token)),
+    )
 }
 
 fn validate_metadata(
@@ -175,13 +191,15 @@ fn sanitize_filename(value: &str) -> Result<String, String> {
     let upper = device_name.to_ascii_uppercase();
     let reserved = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ["COM", "LPT"].iter().any(|prefix| {
-            upper.strip_prefix(prefix).is_some_and(|suffix| {
-                suffix.len() == 1
-                    && suffix
-                        .bytes()
-                        .next()
-                        .is_some_and(|byte| (b'1'..=b'9').contains(&byte))
-            })
+            upper
+                .strip_prefix(prefix)
+                .is_some_and(|suffix| {
+                    suffix.len() == 1
+                        && suffix
+                            .bytes()
+                            .next()
+                            .is_some_and(|byte| (b'1'..=b'9').contains(&byte))
+                })
         });
     if reserved {
         return Err("Choose a file name that is not reserved by the operating system.".into());
@@ -199,20 +217,13 @@ fn sanitize_mime_type(value: &str) -> Result<String, String> {
             && part.len() <= 127
             && part.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric()
-                    || matches!(
-                        byte,
-                        b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
-                    )
+                    || matches!(byte, b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-')
             })
     };
     if !valid_token(kind) || !valid_token(subtype) {
         return Err("The file type is invalid.".into());
     }
-    Ok(format!(
-        "{}/{}",
-        kind.to_ascii_lowercase(),
-        subtype.to_ascii_lowercase()
-    ))
+    Ok(format!("{}/{}", kind.to_ascii_lowercase(), subtype.to_ascii_lowercase()))
 }
 
 fn decode_chunk(encoded: &str) -> Result<Vec<u8>, String> {
@@ -393,15 +404,7 @@ pub async fn save_begin(
         target_os = "android"
     )))]
     {
-        let _ = (
-            app,
-            saves,
-            owner,
-            transfer_id,
-            filename,
-            mime_type,
-            expected_bytes,
-        );
+        let _ = (app, saves, owner, transfer_id, filename, mime_type, expected_bytes);
         Err("File saving is unavailable on this platform.".into())
     }
 }
@@ -443,30 +446,43 @@ pub async fn save_write_chunk(
             })
             .await;
         let still_current = owner_for(&webview, &connections, generation, &session_token).is_ok();
-        let mut transfers = saves.0.lock().map_err(|_| "Save state is unavailable.")?;
-        let Some(transfer) = transfers.get_mut(&transfer_id) else {
-            drop(transfers);
-            if !still_current {
+        let cleanup_error = {
+            let mut transfers = saves.0.lock().map_err(|_| "Save state is unavailable.")?;
+            if !transfers.contains_key(&transfer_id) {
+                if !still_current {
+                    Some((true, "This save transfer is no longer active.".to_string()))
+                } else {
+                    Some((false, "This save transfer is no longer active.".to_string()))
+                }
+            } else {
+                let invalid_owner = {
+                    let transfer = transfers.get(&transfer_id).expect("transfer exists");
+                    transfer.owner != owner || !transfer.busy || !still_current
+                };
+                if invalid_owner {
+                    transfers.remove(&transfer_id);
+                    Some((true, "This server session is no longer active.".to_string()))
+                } else if let Err(error) = result {
+                    transfers.remove(&transfer_id);
+                    Some((true, error))
+                } else {
+                    let transfer = transfers
+                        .get_mut(&transfer_id)
+                        .expect("transfer exists");
+                    transfer.written_bytes += bytes.len() as u64;
+                    transfer.next_sequence += 1;
+                    transfer.last_chunk_short = bytes.len() < CHUNK_BYTES;
+                    transfer.busy = false;
+                    None
+                }
+            }
+        };
+        if let Some((cancel, error)) = cleanup_error {
+            if cancel {
                 let _ = bridge.save_cancel(TransferArgs { transfer_id }).await;
             }
-            return Err("This save transfer is no longer active.".into());
-        };
-        if transfer.owner != owner || !transfer.busy || !still_current {
-            transfers.remove(&transfer_id);
-            drop(transfers);
-            let _ = bridge.save_cancel(TransferArgs { transfer_id }).await;
-            return Err("This server session is no longer active.".into());
-        }
-        if let Err(error) = result {
-            transfers.remove(&transfer_id);
-            drop(transfers);
-            let _ = bridge.save_cancel(TransferArgs { transfer_id }).await;
             return Err(error);
         }
-        transfer.written_bytes += bytes.len() as u64;
-        transfer.next_sequence += 1;
-        transfer.last_chunk_short = bytes.len() < CHUNK_BYTES;
-        transfer.busy = false;
         return Ok(());
     }
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
@@ -499,15 +515,7 @@ pub async fn save_write_chunk(
         target_os = "android"
     )))]
     {
-        let _ = (
-            app,
-            webview,
-            connections,
-            saves,
-            bytes,
-            sequence,
-            chunk_base64,
-        );
+        let _ = (app, webview, connections, saves, bytes, sequence, chunk_base64);
         Err("File saving is unavailable on this platform.".into())
     }
 }
@@ -587,15 +595,7 @@ pub async fn save_finish(
         target_os = "android"
     )))]
     {
-        let _ = (
-            app,
-            webview,
-            connections,
-            saves,
-            generation,
-            session_token,
-            transfer_id,
-        );
+        let _ = (app, webview, connections, saves, generation, session_token, transfer_id);
         Err("File saving is unavailable on this platform.".into())
     }
 }
@@ -650,15 +650,7 @@ pub async fn save_cancel(
         target_os = "android"
     )))]
     {
-        let _ = (
-            app,
-            webview,
-            connections,
-            saves,
-            generation,
-            session_token,
-            transfer_id,
-        );
+        let _ = (app, webview, connections, saves, generation, session_token, transfer_id);
         Err("File saving is unavailable on this platform.".into())
     }
 }
@@ -827,11 +819,9 @@ mod tests {
             })
         );
         let object = value.as_object().unwrap();
-        assert!(
-            !object
-                .keys()
-                .any(|key| { key.contains("path") || key.contains("uri") || key.contains('_') })
-        );
+        assert!(!object.keys().any(|key| {
+            key.contains("path") || key.contains("uri") || key.contains('_')
+        }));
 
         assert_eq!(
             serde_json::to_value(WriteChunkArgs {
@@ -858,14 +848,7 @@ mod tests {
     #[test]
     fn filename_and_mime_validation_reject_paths_controls_and_reserved_names() {
         assert_eq!(sanitize_filename(" report.txt ").unwrap(), "report.txt");
-        for invalid in [
-            "",
-            "../report.txt",
-            "C:\\report.txt",
-            "NUL.txt",
-            "COM4.log",
-            "bad\nname",
-        ] {
+        for invalid in ["", "../report.txt", "C:\\report.txt", "NUL.txt", "COM4.log", "bad\nname"] {
             assert!(sanitize_filename(invalid).is_err(), "accepted {invalid:?}");
         }
         assert_eq!(sanitize_mime_type("Text/Plain").unwrap(), "text/plain");
@@ -989,12 +972,9 @@ mod tests {
             last_chunk_short: false,
             busy: false,
             finishing: false,
-            sink: TransferSink::Desktop(
-                DesktopSink::create(
-                    std::env::temp_dir().join(format!("owc-limit-{}.tmp", Uuid::new_v4())),
-                )
-                .unwrap(),
-            ),
+            sink: TransferSink::Desktop(DesktopSink::create(
+                std::env::temp_dir().join(format!("owc-limit-{}.tmp", Uuid::new_v4())),
+            ).unwrap()),
         };
         assert!(validate_chunk(&at_limit, 0, b"x").is_err());
     }
