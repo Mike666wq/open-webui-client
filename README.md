@@ -4,7 +4,7 @@ Open WebUI Client 是一个用 Tauri 2 打包的轻量客户端。它直接连�
 
 首版交付目标为 Windows 10/11 x64 NSIS 安装程序（包含离线 WebView2 Runtime）、macOS 12 及以上 Apple Silicon ad-hoc DMG，以及 Android 10 及以上 ARM64 release APK（固定 keystore 签名）。macOS 包没有 Developer ID 签名或公证。
 
-GitHub Actions 在 `main` 上执行质量检查；手动发版时先自动递增 patch 版本并提交到 `main`，再以同一源码 SHA 构建三端。只有三个平台全部成功后才创建 tag、上传安装包和 SHA-256 校验文件，并公开 GitHub Release。CI 成功仍不代表真实设备验收通过。请查看[实施阶段](docs/IMPLEMENTATION_STAGES.md)、[验收清单](docs/ACCEPTANCE.md)和[Actions 构建说明](docs/GITHUB_ACTIONS.md)。
+GitHub Actions 在 `main` 上执行质量检查；手动发版时先自动递增 patch 版本并提交到 `main`，再以同一源码 SHA 构建三端。只有三个平台全部成功后才创建 tag、上传安装包和 SHA-256 校验文件，并公开 GitHub Release。请从[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)下载当前版本。CI 与下载校验通过仍不代表真实设备验收通过。请查看[实施阶段](docs/IMPLEMENTATION_STAGES.md)、[验收清单](docs/ACCEPTANCE.md)和[Actions 构建说明](docs/GITHUB_ACTIONS.md)。
 
 ## 连接服务
 
@@ -24,7 +24,7 @@ Android 系统返回键在服务页面时回到本地连接设置页，在设置
 
 ## 版本
 
-应用的稳定语义版本 `0.2.0` 同步保存在 `package.json`、Cargo、Tauri 和两份锁文件中。运行 `npm run version:check` 检查一致性；准备新版本时使用 `node scripts/manage-version.mjs bump patch`（也支持 `minor`、`major` 或明确的递增 `X.Y.Z`）。源码中的 Android `versionCode` 为 debug 占位值 `2`。只有从 `main` 手动运行 Android release 时，CI 才将生成 Gradle 工程的 release `defaultConfig.versionCode` 设为 `1000 + github.run_number`；重跑同一 workflow run 使用同一代码，任何新 run 都递增。release APK 名称和 artifact 会包含该 versionCode。
+每次发布时，稳定语义版本会同步写入 `package.json`、Cargo、Tauri 和两份锁文件；当前发布版本请查看[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)。运行 `npm run version:check` 检查一致性；准备新版本时使用 `node scripts/manage-version.mjs bump patch`（也支持 `minor`、`major` 或明确的递增 `X.Y.Z`）。源码中的 Android `versionCode` 为 debug 占位值 `2`。只有从 `main` 手动运行 Android release 时，CI 才将生成 Gradle 工程的 release `defaultConfig.versionCode` 设为 `1000 + github.run_number`；重跑同一 workflow run 使用同一代码，任何新 run 都递增。release APK 名称和 artifact 会包含该 versionCode。
 
 ## 构建
 

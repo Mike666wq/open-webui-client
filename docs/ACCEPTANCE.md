@@ -3,13 +3,17 @@
 ## GitHub Actions 构建
 
 - [x] 历史阶段四基线 push run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source/output SHA `9effd627031d985395e650bf17933a38e8e56dcd`：Node tests 20/20、版本一致性、Rust 格式、JDK 25 临时 PKCS#12 生成 smoke test 通过；Windows NSIS、macOS ARM64 ad-hoc DMG/Rust tests 12/12 和 Android debug 检查通过。
-- [ ] 新 main-only 发布 workflow 的 quality、两 Secrets 的 PKCS#12/alias 检查、APK 签名及 metadata 验证、三端 pinned SHA 和发布门禁通过 GitHub Actions 验证。
-- [ ] main push quality 成功后，cleanup 仅删除四个列明且仍是 pinned main SHA ancestor 的旧 stage branch；未知、变化或未合入 ref 保持不动。
-- [ ] 在 `main` 手动运行 **Build desktop and Android packages** 时自动 patch bump 并 non-force 提交 main；quality、Windows、macOS、Android 全部使用同一个 bump commit SHA。
-- [ ] Android signed ARM64 APK 通过签名验证，package ID 为 `local.openwebui.client`、minSdk 为 29、包含 ARM64 native library、versionCode 匹配该 run 的 `1000 + github.run_number`，且不超过 `2,100,000,000`。
-- [ ] Windows x64 NSIS、macOS Apple Silicon ARM64 ad-hoc DMG 和 Android ARM64 signed APK 全部成功后才创建 tag、生成 `SHA256SUMS` 并公开 GitHub Release；任何平台失败都不创建公开 Release。
-- [ ] 同一 workflow run 重试复用同一 patch commit/tag/versionCode；新 run 自动递增 patch 和 versionCode；源码/debug Android versionCode 仍为 `2`。
-- [ ] 两项 signing secrets 为 `ANDROID_KEYSTORE_PASSWORD` 与 `ANDROID_KEYSTORE_BASE64`；缺少或无效时在版本 bump 前失败。固定 alias 为 `openwebui-client`，key password 复用 store password。
+- [x] main 修复 push run [#51](https://github.com/Mike666wq/open-webui-client/actions/runs/38995797837)，SHA `260acae8fe9100dfb752506118513f8f6d2712af`：Node tests 33/33、0 skipped，版本一致性、JDK 25 临时 keystore smoke test、Rust 格式和受限旧分支清理均通过。
+- [x] 首次 main 手动发版 run [#52](https://github.com/Mike666wq/open-webui-client/actions/runs/38995899635)：两项 signing secrets 与 PKCS#12/alias 检查通过；自动 patch bump 到 `0.2.2`，并固定三端源码 SHA `3edd2b1191f5f7bbd56cf2d35dd401bb61489f10`，Android versionCode 为 `1052`。
+- [x] Run #52 的 release quality 通过；macOS ARM64 ad-hoc DMG 与 Rust tests 12/12、Windows x64 NSIS 和 Android signed ARM64 APK 均成功。APK 签名证书、package ID `local.openwebui.client`、minSdk 29、ARM64 ABI 和 versionCode 检查通过；三个构建均来自同一 pinned SHA。
+- [x] Run #52 创建并公开 [Release v0.2.2](https://github.com/Mike666wq/open-webui-client/releases/tag/v0.2.2)，含三端包及 `SHA256SUMS`；匿名 HEAD 请求对四个资产均返回 HTTP 200 和预期长度。校验文件包含且仅包含三个安装包，完整流式 SHA-256 与校验文件及 GitHub REST digest 匹配；文件未下载到本地。
+- [x] 下载资产长度：Windows `Open-WebUI-Client-0.2.2-windows-x64-setup.exe` 219,464,462 bytes；macOS `Open-WebUI-Client-0.2.2-macos-arm64.dmg` 4,015,417 bytes；Android `Open-WebUI-Client-0.2.2-android-arm64-vc1052.apk` 13,986,692 bytes；`SHA256SUMS` 333 bytes。
+- [x] main push quality run [#49](https://github.com/Mike666wq/open-webui-client/actions/runs/38994807152) 与修复后的 [#51](https://github.com/Mike666wq/open-webui-client/actions/runs/38995797837) 均成功；受限清理只针对固定的四个已合入旧 stage 分支，且在当前 main 上完成。
+- [x] 在 `main` 手动运行 **Build desktop and Android packages** 时自动 patch bump 并 non-force 提交 main；Run #52 的质量检查及三端构建均使用同一个 bump commit SHA。
+- [x] Android signed ARM64 APK 通过签名验证，package ID 为 `local.openwebui.client`、minSdk 为 29、包含 ARM64 native library、versionCode 为 `1000 + github.run_number`（Run #52 为 `1052`）。
+- [x] Windows x64 NSIS、macOS Apple Silicon ARM64 ad-hoc DMG 和 Android ARM64 signed APK 全部成功后才创建 tag、生成 `SHA256SUMS` 并公开 GitHub Release；Run #52 完成该门禁。
+- [x] 同一 workflow run 重试复用同一 patch commit/tag/versionCode；新 run 自动递增 patch 和 versionCode；源码/debug Android versionCode 保持 `2`。Run #52 使用 `0.2.2`、tag `v0.2.2` 与 versionCode `1052`。
+- [x] 两项 signing secrets 为 `ANDROID_KEYSTORE_PASSWORD` 与 `ANDROID_KEYSTORE_BASE64`；Run #52 在版本 bump 前成功验证两项配置及 PKCS#12 alias。固定 alias 为 `openwebui-client`，key password 复用 store password。
 - [ ] Keystore bootstrap 仅允许 main 手动运行；存在 `ANDROID_KEYSTORE_BASE64` 或同一 run rerun 时拒绝生成。生成的加密 PKCS#12 artifact 一天后过期，且不作为私密存储。
 
 ## 维护者签名密钥初始化
@@ -20,7 +24,7 @@
 - [ ] 立即下载密码保护 PKCS#12 artifact，在仓库外安全位置私下备份并验证文件；然后删除 artifact 与初始化 workflow run。不要把 artifact URL 当成私有访问控制。
 - [ ] 在本机 PowerShell 将备份文件编码到剪贴板，再通过仓库设置 UI 添加剩余的 `ANDROID_KEYSTORE_BASE64` secret。不要将 Base64 写入终端历史、文件、issue 或聊天；设置后清空剪贴板。
 - [ ] 确认仅设置两个 secrets：`ANDROID_KEYSTORE_BASE64` 和 `ANDROID_KEYSTORE_PASSWORD`。固定 alias 是 `openwebui-client`，Android key password 与 store password 相同，不创建冗余 alias/password secrets。
-- [ ] 在所有代码检查通过后，从 `main` 手动运行 **Build desktop and Android packages**；验证公开 Release 中三端包、`SHA256SUMS` 与签名 APK 证书指纹。
+- [x] 在所有代码检查通过后，从 `main` 手动运行 **Build desktop and Android packages**；Run #52 验证公开 Release 中三端包、`SHA256SUMS` 与签名 APK 证书指纹。
 
 ## Windows 与 macOS 真机验收
 
