@@ -266,7 +266,45 @@ def select_wallpaper(output):
         raise DiagnosisFailure(
             f"{IMAGE_NAME} was not available in the Android document picker"
         )
+    before = {
+        (node.get("text", ""), node.get("content-desc", ""), node.get("bounds", ""))
+        for node in hierarchy(output, "image-picker-before-selection")
+    }
     tap_node(entry)
+    # Android's Photos app can open a full-screen preview for a single tap.
+    # Use its explicit "Done/Select" action when present; otherwise Back returns
+    # the chosen document to ACTION_OPEN_DOCUMENT.
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        nodes = hierarchy(output, "image-picker-confirm")
+        current = {
+            (node.get("text", ""), node.get("content-desc", ""), node.get("bounds", ""))
+            for node in nodes
+        }
+        if current == before:
+            time.sleep(1)
+            continue
+        labels = {
+            (node.get("text", "").strip(), node.get("content-desc", "").strip())
+            for node in nodes
+        }
+        if any(IMAGE_NAME in text or IMAGE_NAME in desc for text, desc in labels):
+            return
+        for label in ("Done", "Select", "Open", "Add"):
+            for node in nodes:
+                if label.casefold() in {
+                    node.get("text", "").casefold(),
+                    node.get("content-desc", "").casefold(),
+                }:
+                    tap_node(node)
+                    time.sleep(1)
+                    break
+            else:
+                continue
+            break
+        time.sleep(1)
+    shell("input keyevent KEYCODE_BACK")
+    time.sleep(1)
 
 
 def set_slider_to_start(output, label):
