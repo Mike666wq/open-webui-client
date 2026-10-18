@@ -313,16 +313,8 @@ def collect_persisted_config(output):
     directory = f"/data/user/0/{PACKAGE}/no_backup/appearance"
     listing = shell(f"ls -la {directory}", check=False)
     (output / "appearance-storage.txt").write_text(listing + "\n", encoding="utf-8")
-    configs = [
-        line.split()[-1]
-        for line in listing.splitlines()
-        if line.strip().endswith(".json")
-    ]
-    images = [
-        line.split()[-1]
-        for line in listing.splitlines()
-        if re.search(r"wallpaper-[a-f0-9-]+\.jpg$", line)
-    ]
+    configs = re.findall(r"(?m)(\S+\.json)\s*$", listing)
+    images = re.findall(r"(?m)(wallpaper-[a-f0-9-]+\.jpg)\s*$", listing)
     if not configs or not images:
         raise DiagnosisFailure("Persisted appearance config or decoded JPEG was not found")
     config = shell(f"cat {directory}/{configs[0]}", check=False)
