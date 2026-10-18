@@ -358,3 +358,30 @@ test('published-run preflight verifies existing public assets without preparing 
   adapter.getPublicChecksums = async () => 'corrupt';
   await assert.rejects(alreadyPublished(adapter, pin), /checksum/);
 });
+
+test('Android-only publishing requires only Android and publishes only APK plus checksum', async () => {
+  const pin = validPin();
+  const adapter = fakePublishAdapter();
+  const result = await publishRelease(adapter, pin, {
+    sourceSha: pin.commitSha, targets: ['android'], android: 'success',
+  }, { android: artifacts(pin).android });
+  assert.equal(result.assets.length, 2);
+  assert.deepEqual(result.assets.map((a) => a.name), [artifacts(pin).android.name, 'SHA256SUMS']);
+  assert.equal(adapter.state.uploadedAssets[1].bytes.toString().trim().split('\n').length, 1);
+  await assert.rejects(publishRelease(fakePublishAdapter(), pin, {
+    sourceSha: pin.commitSha, targets: ['android'], android: 'failure',
+  }, { android: artifacts(pin).android }), /all pass/);
+});
+
+test('independent Android workflow has a higher monotonic versionCode and keeps it on retry', async () => {
+  const root = await makeRoot();
+  const adapter = fakeGitAdapter();
+  try {
+    const options = { ...runOptions, eventName: 'push', runNumber: '1', versionCodeBase: 100000, root };
+    const pin = await prepareRelease(adapter, options);
+    assert.equal(pin.versionCode, 100001);
+    const retry = await prepareRelease(adapter, options);
+    assert.equal(retry.versionCode, pin.versionCode);
+    assert.equal(adapter.state.calls.filter((call) => call === 'commitReleaseBump').length, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

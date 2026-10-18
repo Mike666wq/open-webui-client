@@ -1,8 +1,8 @@
 # 当前发布流程
 
-PR → 快检与审查 → 合并 main → 自动 patch 升版 → 三端构建与 API29/36 全部验收 → 发布。
+PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android APK 构建与 API29/36 全部验收 → 发布。
 
-- 正式入口保留 `build.yml`，Android versionCode 继续使用 `1000 + github.run_number`。
+- 正式入口为独立 `android.yml`，合并 main 后全自动发布 APK；不会触发 Windows/macOS。迁移后 Android versionCode 使用 `100000 + github.run_number`，大于此前已发布 APK，同一次运行重跑保持不变。旧三端工作流已移除。
 - PR 快检不接收签名 secrets、不运行 APK 或模拟器。文档变更在 main 仅快检。
 - main 发布串行；未准备版本的过期提交正常跳过，正在运行的固定源码版本完成后再处理最新 main。
 - 失败时不发版。优先 Re-run failed jobs；同 run 全量重跑复用原版本 pin，artifact 按 attempt 隔离、保留14天。

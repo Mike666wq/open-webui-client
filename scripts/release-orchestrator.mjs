@@ -22,6 +22,13 @@ const VERSION_FILES = [
   'src-tauri/Cargo.lock',
 ];
 const PLATFORM_ORDER = ['windows', 'macos', 'android'];
+function requestedPlatforms(targets = PLATFORM_ORDER) {
+  if (JSON.stringify(targets) !== JSON.stringify(PLATFORM_ORDER) && JSON.stringify(targets) !== '["android"]') {
+    throw new Error('Unsupported release targets');
+  }
+  return targets;
+}
+
 const PLATFORM_EXTENSIONS = { windows: '.exe', macos: '.dmg', android: '.apk' };
 const RUN_MARKER_PREFIX = 'openwebui-release-run:';
 const SHA_PATTERN = /^[a-f0-9]{40}$/i;
@@ -65,14 +72,14 @@ function validatePin(pin) {
   };
 }
 
-function pinFromMarker(marker, runId, runNumber) {
+function pinFromMarker(marker, runId, runNumber, versionCodeBase = 1000) {
   if (!marker || String(marker.runId) !== runId) {
     throw new Error('The stored release marker does not match this workflow run');
   }
   return validatePin({
     ...marker,
     runId,
-    versionCode: versionCodeFromRunNumber(runNumber),
+    versionCode: marker.versionCode ?? versionCodeFromRunNumber(runNumber, versionCodeBase),
   });
 }
 
@@ -94,6 +101,7 @@ export async function prepareRelease(adapter, {
   runId,
   runNumber,
   workspaceSha,
+  versionCodeBase = 1000,
   secrets,
   root = projectRoot,
 }) {
@@ -103,12 +111,12 @@ export async function prepareRelease(adapter, {
   }
   if (!validRunId(String(runId))) throw new Error('GitHub run ID is invalid');
   const normalizedRunId = String(runId);
-  const versionCode = versionCodeFromRunNumber(Number(runNumber));
+  const versionCode = versionCodeFromRunNumber(Number(runNumber), versionCodeBase);
 
   // Check the marker first so a rerun reuses its original source SHA and version.
   const existing = await adapter.findPreparationByRunId(normalizedRunId);
   if (existing) {
-    const pin = pinFromMarker(existing, normalizedRunId, Number(runNumber));
+    const pin = pinFromMarker(existing, normalizedRunId, Number(runNumber), versionCodeBase);
     const mainSha = await adapter.getMainHead();
     if (!await adapter.isAncestor(pin.commitSha, mainSha)) {
       throw new Error('The pinned release commit is no longer in main history');
@@ -160,13 +168,14 @@ function artifactName(platform, version, versionCode) {
 }
 
 function prepareReleaseAssets(pin, checks, artifacts) {
+  const platforms = requestedPlatforms(checks?.targets);
   if (!checks || checks.sourceSha?.toLowerCase() !== pin.commitSha ||
-      PLATFORM_ORDER.some((platform) => checks[platform] !== 'success')) {
-    throw new Error('Windows, macOS, and Android builds must all pass for the pinned source SHA');
+      platforms.some((platform) => checks[platform] !== 'success')) {
+    throw new Error('Requested platform builds must all pass for the pinned source SHA');
   }
   const names = new Set();
   const packages = [];
-  for (const platform of PLATFORM_ORDER) {
+  for (const platform of platforms) {
     const artifact = artifacts?.[platform];
     const expectedName = artifactName(platform, pin.version, pin.versionCode);
     if (!artifact || artifact.name !== expectedName || artifact.sourceSha?.toLowerCase() !== pin.commitSha ||
@@ -335,7 +344,8 @@ function createGitHubAdapter(env) {
           if (marker === `${RUN_MARKER_PREFIX}${runId}`) {
             const version = message.match(/^chore\(release\): v(\d+\.\d+\.\d+)$/m)?.[1];
             if (!version || found) throw new Error('Duplicate or malformed release run marker in main history');
-            found = { runId, version, tag: `v${version}`, commitSha: item.sha };
+            found = { runId, version, tag: `v${version}`, commitSha: item.sha,
+              versionCode: Number(message.match(/^openwebui-android-version-code:(\d+)$/m)?.[1]) || undefined };
           }
         }
         if (commits.length < 100) break;
@@ -343,7 +353,7 @@ function createGitHubAdapter(env) {
       }
       return found;
     },
-    async commitReleaseBump({ expectedBaseSha, runId, version, marker, versionFiles }) {
+    async commitReleaseBump({ expectedBaseSha, runId, version, marker, versionCode, versionFiles }) {
       const tree = await getTree(expectedBaseSha);
       const entries = [];
       for (const [filePath, content] of Object.entries(versionFiles)) {
@@ -366,7 +376,7 @@ function createGitHubAdapter(env) {
       const commit = await request('/git/commits', {
         method: 'POST',
         body: {
-          message: `chore(release): v${version}\n\n${marker}`,
+          message: `chore(release): v${version}\n\n${marker}\nopenwebui-android-version-code:${versionCode}`,
           tree: newTree.sha,
           parents: [expectedBaseSha],
         },
@@ -499,19 +509,20 @@ function readPinFromEnv(env) {
   };
 }
 
-async function readArtifacts(directory, pin) {
+async function readArtifacts(directory, pin, targets = PLATFORM_ORDER) {
+  const platforms = requestedPlatforms(targets);
   const names = {
     windows: artifactName('windows', pin.version, pin.versionCode),
     macos: artifactName('macos', pin.version, pin.versionCode),
     android: artifactName('android', pin.version, pin.versionCode),
   };
   const directoryEntries = await readdir(directory);
-  const expectedNames = new Set(Object.values(names));
+  const expectedNames = new Set(platforms.map((platform) => names[platform]));
   const actualPackages = directoryEntries.filter((name) => name.endsWith('.exe') || name.endsWith('.dmg') || name.endsWith('.apk'));
-  if (actualPackages.length !== 3 || actualPackages.some((name) => !expectedNames.has(name))) {
-    throw new Error('The downloaded release directory must contain exactly the three pinned platform packages');
+  if (actualPackages.length !== platforms.length || actualPackages.some((name) => !expectedNames.has(name))) {
+    throw new Error('The downloaded release directory must contain exactly the requested pinned platform packages');
   }
-  return Object.fromEntries(await Promise.all(PLATFORM_ORDER.map(async (platform) => [
+  return Object.fromEntries(await Promise.all(platforms.map(async (platform) => [
     platform, await verifyManifest(directory, platform, pin),
   ])));
 }
@@ -520,17 +531,18 @@ function writeGithubOutputs(output, values) {
   return appendFile(output, `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n')}\n`);
 }
 
-export async function alreadyPublished(adapter, pin) {
+export async function alreadyPublished(adapter, pin, targets = PLATFORM_ORDER) {
+  const platforms = requestedPlatforms(targets);
   const release = await adapter.getReleaseByTag(pin.tag);
   if (!release || release.draft) return false;
   if (release.prerelease || await adapter.getTagTarget(pin.tag) !== pin.commitSha) throw new Error('Public release pin mismatch');
-  const names = PLATFORM_ORDER.map((platform) => artifactName(platform, pin.version, pin.versionCode));
+  const names = platforms.map((platform) => artifactName(platform, pin.version, pin.versionCode));
   const assets = release.assets || [];
-  if (assets.length !== 4 || new Set(assets.map((a) => a.name)).size !== 4 ||
+  if (assets.length !== platforms.length + 1 || new Set(assets.map((a) => a.name)).size !== platforms.length + 1 ||
       !assets.some((a) => a.name === 'SHA256SUMS')) throw new Error('Public release manifest incomplete');
   const sums = await adapter.getPublicChecksums(assets.find((a) => a.name === 'SHA256SUMS'));
   const lines = sums.trim().split(/\r?\n/);
-  if (lines.length !== 3) throw new Error('Public release checksum count mismatch');
+  if (lines.length !== platforms.length) throw new Error('Public release checksum count mismatch');
   for (const name of names) {
     const asset = assets.find((item) => item.name === name);
     if (!asset || asset.size <= 0) throw new Error('Public release package missing');
@@ -542,12 +554,12 @@ export async function alreadyPublished(adapter, pin) {
   return true;
 }
 
-export async function planRelease(adapter, { eventName, ref, runId, runNumber, workspaceSha, files = [] }) {
+export async function planRelease(adapter, { eventName, ref, runId, runNumber, versionCodeBase = 1000, targets = PLATFORM_ORDER, workspaceSha, files = [] }) {
   if (!releaseEvent(eventName, ref)) return { release: false, reason: 'pull-request' };
   const existing = await adapter.findPreparationByRunId(String(runId));
   if (existing) {
-    const pin = pinFromMarker(existing, String(runId), Number(runNumber));
-    if (await alreadyPublished(adapter, pin)) return { release: false, reason: 'already-published' };
+    const pin = pinFromMarker(existing, String(runId), Number(runNumber), versionCodeBase);
+    if (await alreadyPublished(adapter, pin, targets)) return { release: false, reason: 'already-published' };
     return { release: true, reason: 'retry-existing-pin' };
   }
   if (eventName === 'push' && isDocumentationOnly(files)) return { release: false, reason: 'documentation-only' };
@@ -561,6 +573,8 @@ async function cliPlan(env) {
   const result = await planRelease(createGitHubAdapter(env), {
     eventName: env.GITHUB_EVENT_NAME, ref: env.GITHUB_REF, runId: env.GITHUB_RUN_ID,
     workspaceSha: env.GITHUB_SHA, runNumber: env.GITHUB_RUN_NUMBER, files,
+    versionCodeBase: Number(env.ANDROID_VERSION_CODE_BASE || 1000),
+    targets: env.RELEASE_TARGETS === 'android' ? ['android'] : PLATFORM_ORDER,
   });
   if (env.GITHUB_OUTPUT) await writeGithubOutputs(env.GITHUB_OUTPUT, {
     release: String(result.release), reason: result.reason,
@@ -575,6 +589,7 @@ async function cliPrepare(env) {
     runId: env.GITHUB_RUN_ID,
     runNumber: env.GITHUB_RUN_NUMBER,
     workspaceSha: env.GITHUB_SHA,
+    versionCodeBase: Number(env.ANDROID_VERSION_CODE_BASE || 1000),
     secrets: {
       ANDROID_KEYSTORE_PASSWORD: env.ANDROID_KEYSTORE_PASSWORD,
       ANDROID_KEYSTORE_BASE64: env.ANDROID_KEYSTORE_BASE64,
@@ -598,8 +613,10 @@ async function cliPublish(env) {
   const pin = validatePin(readPinFromEnv(env));
   const artifactDirectory = env.RELEASE_ARTIFACT_DIR;
   if (!artifactDirectory) throw new Error('RELEASE_ARTIFACT_DIR is required');
-  const artifacts = await readArtifacts(artifactDirectory, pin);
+  const targets = env.RELEASE_TARGETS === 'android' ? ['android'] : PLATFORM_ORDER;
+  const artifacts = await readArtifacts(artifactDirectory, pin, targets);
   const result = await publishRelease(createGitHubAdapter(env), pin, {
+    targets,
     sourceSha: env.RELEASE_SOURCE_SHA,
     windows: env.RELEASE_WINDOWS_RESULT,
     macos: env.RELEASE_MACOS_RESULT,
