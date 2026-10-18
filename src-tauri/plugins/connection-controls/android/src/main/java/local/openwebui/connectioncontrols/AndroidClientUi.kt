@@ -268,6 +268,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         controller.isAppearanceLightNavigationBars = !dark
         controller.isAppearanceLightStatusBars = !dark
         listOfNotNull(menu, settings, confirmation).forEach { styleDialog(it) }
+        personalization?.restyleDialogs()
     }
 
     private fun builder() = AlertDialog.Builder(ContextThemeWrapper(activity,

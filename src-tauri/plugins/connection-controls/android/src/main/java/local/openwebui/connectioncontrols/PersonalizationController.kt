@@ -356,12 +356,14 @@ internal class PersonalizationController(
                 }
             })
         }
+        directory?.let(style)
     }
     fun dismissTop(): Boolean {
         if(directory!=null) { directory?.dismiss(); return true }
         if(editor!=null) { editor?.dismiss(); return true }
         return false
     }
+    fun restyleDialogs() { editor?.let(style); directory?.let(style) }
     fun resume() { themeChanged(); editor?.let(style); directory?.let(style); dirty=true; updateWallpaper(); refresh() }
     fun destroy() {
         disposed=true; revision++; renderRevision++
