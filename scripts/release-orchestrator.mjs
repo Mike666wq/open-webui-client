@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { releaseEvent, isDocumentationOnly } from './release-policy.mjs';
+import { verifyManifest } from './artifact-integrity.mjs';
 import { fileURLToPath } from 'node:url';
 import {
   bumpVersions,
@@ -96,8 +98,8 @@ export async function prepareRelease(adapter, {
   root = projectRoot,
 }) {
   validateReleaseSecrets(secrets);
-  if (eventName !== 'workflow_dispatch' || ref !== 'refs/heads/main') {
-    throw new Error('Release preparation is restricted to manual workflow runs on main');
+  if (!releaseEvent(eventName, ref)) {
+    throw new Error('Release preparation is restricted to main push or manual workflow runs');
   }
   if (!validRunId(String(runId))) throw new Error('GitHub run ID is invalid');
   const normalizedRunId = String(runId);
@@ -119,7 +121,7 @@ export async function prepareRelease(adapter, {
 
   const mainSha = await adapter.getMainHead();
   if (!SHA_PATTERN.test(mainSha) || !SHA_PATTERN.test(workspaceSha) || mainSha.toLowerCase() !== workspaceSha.toLowerCase()) {
-    throw new Error('main moved after this workflow started; refusing to prepare a release from a stale checkout');
+    return { superseded: true };
   }
   const previousVersion = await checkVersions(root);
   const snapshot = await snapshotVersionFiles(root);
@@ -226,7 +228,6 @@ export async function publishRelease(adapter, rawPin, checks, artifacts) {
   if (!await adapter.isAncestor(pin.commitSha, mainSha)) {
     throw new Error('The pinned release commit is no longer in main history');
   }
-  await adapter.assertReleaseWorkflowUnchanged(pin.commitSha, mainSha);
 
   const existingRelease = await adapter.getReleaseByTag(pin.tag);
   const existingTag = await adapter.getTagTarget(pin.tag);
@@ -440,7 +441,15 @@ function createGitHubAdapter(env) {
         uploadUrl: release.upload_url,
       };
     },
+    async getPublicChecksums(asset) {
+      const url = new URL(asset.browserDownloadUrl);
+      if (url.protocol !== 'https:') throw new Error('Public checksum URL must use HTTPS');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Could not verify published checksums');
+      return response.text();
+    },
     async getReleaseAssetDigest(asset) {
+      if (/^sha256:[a-f0-9]{64}$/.test(asset.digest || '')) return asset.digest.slice(7);
       if (!asset.browserDownloadUrl) return null;
       const download = new URL(asset.browserDownloadUrl);
       if (download.protocol !== 'https:') throw new Error('Public release asset URL must use HTTPS');
@@ -503,17 +512,60 @@ async function readArtifacts(directory, pin) {
     throw new Error('The downloaded release directory must contain exactly the three pinned platform packages');
   }
   return Object.fromEntries(await Promise.all(PLATFORM_ORDER.map(async (platform) => [
-    platform,
-    {
-      name: names[platform],
-      bytes: await readFile(path.join(directory, names[platform])),
-      sourceSha: pin.commitSha,
-    },
+    platform, await verifyManifest(directory, platform, pin),
   ])));
 }
 
 function writeGithubOutputs(output, values) {
   return appendFile(output, `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n')}\n`);
+}
+
+export async function alreadyPublished(adapter, pin) {
+  const release = await adapter.getReleaseByTag(pin.tag);
+  if (!release || release.draft) return false;
+  if (release.prerelease || await adapter.getTagTarget(pin.tag) !== pin.commitSha) throw new Error('Public release pin mismatch');
+  const names = PLATFORM_ORDER.map((platform) => artifactName(platform, pin.version, pin.versionCode));
+  const assets = release.assets || [];
+  if (assets.length !== 4 || new Set(assets.map((a) => a.name)).size !== 4 ||
+      !assets.some((a) => a.name === 'SHA256SUMS')) throw new Error('Public release manifest incomplete');
+  const sums = await adapter.getPublicChecksums(assets.find((a) => a.name === 'SHA256SUMS'));
+  const lines = sums.trim().split(/\r?\n/);
+  if (lines.length !== 3) throw new Error('Public release checksum count mismatch');
+  for (const name of names) {
+    const asset = assets.find((item) => item.name === name);
+    if (!asset || asset.size <= 0) throw new Error('Public release package missing');
+    const digest = await adapter.getReleaseAssetDigest(asset);
+    if (!/^[a-f0-9]{64}$/.test(digest || '') || !lines.includes(`${digest}  ${name}`)) {
+      throw new Error('Public release checksum mismatch');
+    }
+  }
+  return true;
+}
+
+export async function planRelease(adapter, { eventName, ref, runId, runNumber, workspaceSha, files = [] }) {
+  if (!releaseEvent(eventName, ref)) return { release: false, reason: 'pull-request' };
+  const existing = await adapter.findPreparationByRunId(String(runId));
+  if (existing) {
+    const pin = pinFromMarker(existing, String(runId), Number(runNumber));
+    if (await alreadyPublished(adapter, pin)) return { release: false, reason: 'already-published' };
+    return { release: true, reason: 'retry-existing-pin' };
+  }
+  if (eventName === 'push' && isDocumentationOnly(files)) return { release: false, reason: 'documentation-only' };
+  const main = await adapter.getMainHead();
+  if (main.toLowerCase() !== workspaceSha.toLowerCase()) return { release: false, reason: 'superseded' };
+  return { release: true, reason: 'release' };
+}
+
+async function cliPlan(env) {
+  const files = JSON.parse(await readFile(env.RELEASE_CHANGED_FILES, 'utf8'));
+  const result = await planRelease(createGitHubAdapter(env), {
+    eventName: env.GITHUB_EVENT_NAME, ref: env.GITHUB_REF, runId: env.GITHUB_RUN_ID,
+    workspaceSha: env.GITHUB_SHA, runNumber: env.GITHUB_RUN_NUMBER, files,
+  });
+  if (env.GITHUB_OUTPUT) await writeGithubOutputs(env.GITHUB_OUTPUT, {
+    release: String(result.release), reason: result.reason,
+  });
+  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `Release selection: ${result.reason}\n`);
 }
 
 async function cliPrepare(env) {
@@ -531,7 +583,8 @@ async function cliPrepare(env) {
   });
   if (env.GITHUB_OUTPUT) {
     await writeGithubOutputs(env.GITHUB_OUTPUT, {
-      version: pin.version,
+      ready: pin.superseded ? 'false' : 'true',
+      version: pin.version || '',
       commit_sha: pin.commitSha,
       tag: pin.tag,
       version_code: pin.versionCode,
@@ -556,6 +609,7 @@ async function cliPublish(env) {
 }
 
 async function main(args, env = process.env) {
+  if (args.length === 1 && args[0] === 'plan') return cliPlan(env);
   if (args.length === 1 && args[0] === 'prepare') return cliPrepare(env);
   if (args.length === 1 && args[0] === 'publish') return cliPublish(env);
   throw new Error('Usage: node scripts/release-orchestrator.mjs prepare | publish');

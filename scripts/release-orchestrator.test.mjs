@@ -8,6 +8,7 @@ import {
   prepareRelease,
   publishRelease,
   validateReleaseSecrets,
+  alreadyPublished,
 } from './release-orchestrator.mjs';
 import { checkVersions } from './manage-version.mjs';
 
@@ -236,9 +237,9 @@ test('prepare fails closed on a stale main checkout, inconsistent versions, or a
   const root = await makeRoot();
   const adapter = fakeGitAdapter();
   try {
-    await assert.rejects(prepareRelease(adapter, {
-      ...runOptions, workspaceSha: 'd'.repeat(40), root,
-    }), /main moved/);
+    assert.deepEqual(await prepareRelease(adapter, {
+      ...runOptions, eventName: 'push', workspaceSha: 'd'.repeat(40), root,
+    }), { superseded: true });
     assert.equal(await checkVersions(root), '0.2.0');
 
     await writeFile(path.join(root, 'src-tauri', 'Cargo.lock'), '[[package]]\nname = "open-webui-client"\nversion = "0.1.9"\n');
@@ -331,4 +332,29 @@ test('draft retry replaces assets, publishes only three packages plus their chec
   }
   assert.equal(result.tag, pin.tag);
   assert.equal(result.commitSha, pin.commitSha);
+});
+
+test('main push prepares a release but untrusted refs/events cannot', async () => {
+  const root = await makeRoot();
+  try {
+    const adapter = fakeGitAdapter();
+    const pin = await prepareRelease(adapter, { ...runOptions, eventName: 'push', root });
+    assert.equal(pin.version, '0.2.1');
+    await assert.rejects(prepareRelease(adapter, { ...runOptions, eventName: 'pull_request', root }), /restricted/);
+    await assert.rejects(prepareRelease(adapter, { ...runOptions, ref: 'refs/heads/feature', root }), /restricted/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('published-run preflight verifies existing public assets without preparing or rebuilding', async () => {
+  const pin = validPin();
+  const adapter = fakePublishAdapter({ tagTarget: pin.commitSha, release: {
+    id: 10, tag: pin.tag, draft: false, prerelease: false, assets: publicAssetMetadata(pin),
+  } });
+  adapter.getReleaseAssetDigest = async (asset) => asset.digest.slice(7);
+  adapter.getPublicChecksums = async () => Object.values(artifacts(pin)).map(({ name, bytes }) =>
+    `${createHash('sha256').update(bytes).digest('hex')}  ${name}`).join('\n') + '\n';
+  assert.equal(await alreadyPublished(adapter, pin), true);
+  assert.equal(adapter.state.createdTags, 0);
+  adapter.getPublicChecksums = async () => 'corrupt';
+  await assert.rejects(alreadyPublished(adapter, pin), /checksum/);
 });

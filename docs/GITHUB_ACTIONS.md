@@ -1,3 +1,18 @@
+# 当前发布流程
+
+PR → 快检与审查 → 合并 main → 自动 patch 升版 → 三端构建与 API29/36 全部验收 → 发布。
+
+- 正式入口保留 `build.yml`，Android versionCode 继续使用 `1000 + github.run_number`。
+- PR 快检不接收签名 secrets、不运行 APK 或模拟器。文档变更在 main 仅快检。
+- main 发布串行；未准备版本的过期提交正常跳过，正在运行的固定源码版本完成后再处理最新 main。
+- 失败时不发版。优先 Re-run failed jobs；同 run 全量重跑复用原版本 pin，artifact 按 attempt 隔离、保留14天。
+- 下载使用成功 job 的 artifact ID；每个包验证源码 SHA、版本、versionCode、run ID 和 SHA256，拒绝缺失或不匹配产物。
+- 已公开版本重跑只验证 tag 和公开校验文件，不覆盖资产；修复源码走新 PR 和新版本。
+- 保留每个 API 三次冷启动、每次60秒观察和所有真实交互检查；先交互后长观察。
+- 手动诊断仍通过 Android emulator startup diagnosis 运行。没有自动 candidate 转发或独立 main push 模拟器。
+
+以下为历史签名配置参考；其中旧 candidate / 手动 release 的日常触发说明已被上述流程替代。
+
 # GitHub Actions 与正式发布
 
 构建工作流位于 `.github/workflows/build.yml`，Android emulator 启动诊断位于 `.github/workflows/android-emulator-diagnose.yml`，一次性 Android keystore 初始化位于 `.github/workflows/bootstrap-android-keystore.yml`。日常开发只在 `main` 上进行。main push 运行 Node tests、版本一致性、JDK 25 临时 PKCS#12 smoke test、Rust 格式检查，以及一个仅核对并删除四个指定且已合入旧 stage 分支的清理 job；修改 app 行为文件时还会启动单独的 x86_64 emulator 诊断，但不会发布安装包。手动 build workflow 接受 `candidate` 或 `release` 模式，不接受平台选择。
