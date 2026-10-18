@@ -1,0 +1,228 @@
+name: Android wallpaper diagnosis
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/android-wallpaper-diagnose
+    paths:
+      - .github/workflows/android-wallpaper-diagnose.yml
+      - scripts/android-wallpaper-diagnose.py
+      - scripts/android-wallpaper-diagnose-workflow.test.mjs
+      - src-tauri/plugins/connection-controls/android/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-wallpaper-diagnose-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: 22.22.0
+  RUST_VERSION: 1.94.0
+  ANDROID_NDK_VERSION: 28.2.13676358
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        with:
+          cache-provider: basic
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+          key: android-wallpaper-x86_64
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Fetch locked Rust dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+      - name: Initialize Android project
+        run: npm run tauri -- android init --ci
+      - name: Create runner-local diagnostic signing key
+        id: signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/android-wallpaper-diagnostic.p12"
+          password="$(openssl rand -hex 32)"
+          version_code=$((1000 + GITHUB_RUN_NUMBER))
+          echo "::add-mask::$password"
+          export DIAGNOSTIC_KEY_PASSWORD="$password"
+          keytool -genkeypair -noprompt -keystore "$keystore" -storetype PKCS12 \
+            -alias openwebui-client -keyalg RSA -keysize 3072 -validity 2 \
+            -dname "CN=Temporary Android Wallpaper Diagnostic" \
+            -storepass:env DIAGNOSTIC_KEY_PASSWORD \
+            -keypass:env DIAGNOSTIC_KEY_PASSWORD >/dev/null 2>&1
+          {
+            echo "ANDROID_KEYSTORE_PATH=$keystore"
+            echo "ANDROID_KEYSTORE_PASSWORD=$password"
+            echo "ANDROID_KEY_ALIAS=openwebui-client"
+            echo "ANDROID_KEY_PASSWORD=$password"
+            echo "ANDROID_RELEASE_VERSION_CODE=$version_code"
+            echo "DIAGNOSTIC_VERSION_CODE=$version_code"
+          } >> "$GITHUB_ENV"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+      - name: Build x86_64 diagnostic APK
+        run: |
+          node scripts/prepare-android.mjs
+          npm run tauri -- android build --apk --target x86_64
+      - name: Verify diagnostic APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(
+            find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*release*'
+          )
+          test "${#apks[@]}" -eq 1
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "${apks[0]}"
+          unzip -l "${apks[0]}" | grep -q 'lib/x86_64/'
+          mkdir -p "$RUNNER_TEMP/android-wallpaper-apk"
+          cp "${apks[0]}" "$RUNNER_TEMP/android-wallpaper-apk/wallpaper-diagnostic.apk"
+          sha256sum "$RUNNER_TEMP/android-wallpaper-apk/wallpaper-diagnostic.apk" \
+            > "$RUNNER_TEMP/android-wallpaper-apk/SHA256SUMS"
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: android-wallpaper-diagnostic-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-wallpaper-apk/
+          retention-days: 7
+          if-no-files-found: error
+
+  emulator:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools emulator
+      - name: Install emulator and screenshot tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          sdkmanager \
+            "emulator" \
+            "system-images;android-36;google_apis;x86_64"
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/android-wallpaper-apk
+      - name: Enable KVM
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Boot API 36 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/android-wallpaper-evidence"
+          mkdir -p "$evidence"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          printf 'no\n' | avdmanager create avd --force \
+            --name wallpaper-api-36 \
+            --package "system-images;android-36;google_apis;x86_64" \
+            --device pixel_2
+          nohup emulator -avd wallpaper-api-36 -no-window -no-audio -no-boot-anim \
+            -gpu swiftshader_indirect -accel on \
+            > "$RUNNER_TEMP/wallpaper-emulator.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/wallpaper-emulator.pid"
+          adb start-server
+          deadline=$((SECONDS + 420))
+          until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              tail -300 "$RUNNER_TEMP/wallpaper-emulator.log" > "$evidence/startup.log"
+              exit 1
+            fi
+            sleep 5
+          done
+          shell_settings=(
+            "settings put global window_animation_scale 0"
+            "settings put global transition_animation_scale 0"
+            "settings put global animator_duration_scale 0"
+          )
+          for setting in "${shell_settings[@]}"; do adb shell "$setting"; done
+      - name: Install and verify diagnostic APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/android-wallpaper-apk"
+          sha256sum --check SHA256SUMS
+          adb install -r wallpaper-diagnostic.apk
+      - name: Run real Android wallpaper workflow
+        run: |
+          python scripts/android-wallpaper-diagnose.py \
+            --output "$RUNNER_TEMP/android-wallpaper-evidence" \
+            --source-sha "$GITHUB_SHA"
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-wallpaper-evidence-${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-wallpaper-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Stop emulator
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -s "$RUNNER_TEMP/wallpaper-emulator.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/wallpaper-emulator.pid")" 2>/dev/null
+          fi

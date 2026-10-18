@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+test('wallpaper diagnosis is isolated from both quick checks and APK releases', async () => {
+  const workflow = await readFile(
+    new URL('../.github/workflows/android-wallpaper-diagnose.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(workflow, /name: Android wallpaper diagnosis/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /branches:\s*\n\s*- codex\/android-wallpaper-diagnose/);
+  assert.match(workflow, /system-images;android-36;google_apis;x86_64/);
+  assert.doesNotMatch(workflow, /branches:\s*\n\s*- main/);
+  assert.doesNotMatch(workflow, /windows-|macos-|release-orchestrator\.mjs publish/);
+  assert.match(workflow, /android-wallpaper-diagnose\.py/);
+  assert.match(workflow, /android-wallpaper-evidence/);
+});
+
+test('wallpaper diagnosis contains a real import, visual assertion and persistence check', async () => {
+  const script = await readFile(
+    new URL('./android-wallpaper-diagnose.py', import.meta.url),
+    'utf8',
+  );
+  assert.match(script, /ACTION_OPEN_DOCUMENT|Choose image/);
+  assert.match(script, /ImageMagick RMSE|compare.*RMSE/s);
+  assert.match(script, /appearance-config\.json/);
+  assert.match(script, /Persisted appearance config or decoded JPEG was not found/);
+  assert.match(script, /failure-logcat\.txt/);
+});
