@@ -275,10 +275,16 @@ def find_image_picker_entry(output, timeout=45):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         nodes = hierarchy(output, "image-picker")
-        for node in reversed(nodes):
+        for node in nodes:
             text = node.get("text", "").casefold()
             description = node.get("content-desc", "").casefold()
-            if IMAGE_NAME.casefold() in text or IMAGE_NAME.casefold() in description:
+            is_file_row = description.startswith(IMAGE_NAME.casefold())
+            has_file_name = IMAGE_NAME.casefold() in text or IMAGE_NAME.casefold() in description
+            # The thumbnail has a separate "Preview the file ..." hit target in
+            # its corner. Tapping that opens Google Photos instead of returning
+            # ACTION_OPEN_DOCUMENT, so prefer the file row's full hit area.
+            is_preview_action = "preview the file" in description
+            if (is_file_row or has_file_name) and not is_preview_action:
                 bounds(node)
                 return node
         time.sleep(1)

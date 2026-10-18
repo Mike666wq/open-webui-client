@@ -27,6 +27,8 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /def wait_for_web_page/);
   assert.match(script, /Connected WebView did not render/);
   assert.match(script, /\.pixels\.txt/);
+  assert.match(script, /preview the file/);
+  assert.match(script, /not is_preview_action/);
   assert.doesNotMatch(script, /find\(output, "Wallpaper fixture 8765"/);
   assert.match(script, /appearance-config\.json/);
   assert.match(script, /Persisted appearance config or decoded JPEG was not found/);
