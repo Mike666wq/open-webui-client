@@ -1,0 +1,78 @@
+name: Quick source checks
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  NODE_VERSION: 22.22.0
+  RUST_VERSION: 1.94.0
+jobs:
+  checks:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Check Android test harness syntax on the runner
+        run: python3 -m py_compile scripts/*.py
+      - name: Verify SAVE recognition against the captured API29 regression screenshot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr imagemagick
+          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
+      - name: Run Node tests
+        run: npm test
+      - name: Build frontend
+        run: npm run build
+      - name: Check synchronized app version
+        run: npm run version:check
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Smoke-test protected Android keystore generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 32)"
+          export ANDROID_KEYSTORE_BASE64=''
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/keystore-smoke.XXXXXX")"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          node scripts/generate-android-keystore.mjs "$smoke_dir"
+          test -s "$smoke_dir/openwebui-client.p12"
+          test -s "$smoke_dir/keystore-fingerprint.txt"
+          export ANDROID_KEYSTORE_BASE64="$(base64 -w 0 "$smoke_dir/openwebui-client.p12")"
+          node scripts/validate-android-keystore.mjs
+          echo "Temporary Android keystore generation, alias and password validation passed."
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml --check
+      - name: Validate workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.7.12
+          temp="$RUNNER_TEMP/actionlint"
+          mkdir -p "$temp"
+          cd "$temp"
+          curl -fsSLO "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
+          curl -fsSLO "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_checksums.txt"
+          sha256sum --check --ignore-missing "actionlint_${version}_checksums.txt"
+          tar -xzf "actionlint_${version}_linux_amd64.tar.gz" actionlint
+          cd "$GITHUB_WORKSPACE"
+          "$temp/actionlint" -shellcheck= -pyflakes=

@@ -236,9 +236,9 @@ test('prepare fails closed on a stale main checkout, inconsistent versions, or a
   const root = await makeRoot();
   const adapter = fakeGitAdapter();
   try {
-    await assert.rejects(prepareRelease(adapter, {
-      ...runOptions, workspaceSha: 'd'.repeat(40), root,
-    }), /main moved/);
+    assert.deepEqual(await prepareRelease(adapter, {
+      ...runOptions, eventName: 'push', workspaceSha: 'd'.repeat(40), root,
+    }), { superseded: true });
     assert.equal(await checkVersions(root), '0.2.0');
 
     await writeFile(path.join(root, 'src-tauri', 'Cargo.lock'), '[[package]]\nname = "open-webui-client"\nversion = "0.1.9"\n');
@@ -331,4 +331,15 @@ test('draft retry replaces assets, publishes only three packages plus their chec
   }
   assert.equal(result.tag, pin.tag);
   assert.equal(result.commitSha, pin.commitSha);
+});
+
+test('main push prepares a release but untrusted refs/events cannot', async () => {
+  const root = await makeRoot();
+  try {
+    const adapter = fakeGitAdapter();
+    const pin = await prepareRelease(adapter, { ...runOptions, eventName: 'push', root });
+    assert.equal(pin.version, '0.2.1');
+    await assert.rejects(prepareRelease(adapter, { ...runOptions, eventName: 'pull_request', root }), /restricted/);
+    await assert.rejects(prepareRelease(adapter, { ...runOptions, ref: 'refs/heads/feature', root }), /restricted/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

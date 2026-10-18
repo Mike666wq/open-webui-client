@@ -4,30 +4,22 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
-        description: Build an installable signed Android candidate, or publish a three-platform release
+        description: Resume or start a complete release on main
         required: true
         type: choice
-        default: candidate
-        options:
-          - candidate
-          - release
-      skip_emulator:
-        description: Skip emulator checks for investigation only; this run cannot publish a Release
-        required: false
-        type: boolean
-        default: false
+        default: release
+        options: [release]
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: release-main
   cancel-in-progress: false
+  queue: max
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,10 +31,13 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       source_sha: ${{ steps.lock.outputs.source_sha }}
+      release: ${{ steps.selection.outputs.release }}
+      reason: ${{ steps.selection.outputs.reason }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - name: Require checked-in lockfiles and pin source
         id: lock
         shell: bash
@@ -51,136 +46,46 @@ jobs:
           test -s package-lock.json
           test -s src-tauri/Cargo.lock
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  quality:
-    needs: prepare-lockfile
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Check Android test harness syntax on the runner
-        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
-      - name: Verify SAVE recognition against the captured API29 regression screenshot
+      - name: Select latest relevant main source before expensive work
+        id: selection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_CHANGED_FILES: ${{ runner.temp }}/release-changes.json
         run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr imagemagick
-          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
-      - name: Run Node tests
-        run: npm test
-      - name: Check synchronized app version
-        run: npm run version:check
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-      - name: Smoke-test protected Android keystore generation
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 32)"
-          export ANDROID_KEYSTORE_BASE64=''
-          smoke_dir="$(mktemp -d "$RUNNER_TEMP/keystore-smoke.XXXXXX")"
-          trap 'rm -rf "$smoke_dir"' EXIT
-          node scripts/generate-android-keystore.mjs "$smoke_dir"
-          test -s "$smoke_dir/openwebui-client.p12"
-          test -s "$smoke_dir/keystore-fingerprint.txt"
-          export ANDROID_KEYSTORE_BASE64="$(base64 -w 0 "$smoke_dir/openwebui-client.p12")"
-          node scripts/validate-android-keystore.mjs
-          echo "Temporary Android keystore generation, alias and password validation passed."
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-      - name: Check Rust formatting
-        run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all
-          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
-          git diff --binary > "$RUNNER_TEMP/rustfmt.patch"
-          git diff --exit-code
-      - name: Upload runner-generated formatting suggestions
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustfmt-${{ github.job }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/rustfmt.patch
-          if-no-files-found: ignore
-          retention-days: 1
+          python3 - <<'PYCODE'
+          import json, os, subprocess
+          before = os.environ.get('RELEASE_BEFORE_SHA', '')
+          files = ['.github/workflows/build.yml']
+          if before and set(before) != {'0'}:
+              data = subprocess.check_output(['git', 'diff', '--name-only', '-z', before, os.environ['GITHUB_SHA']])
+              files = [p.decode() for p in data.split(b'\0') if p]
+          with open(os.environ['RELEASE_CHANGED_FILES'], 'w') as f:
+              json.dump(files, f)
+          PYCODE
+          node scripts/release-orchestrator.mjs plan
 
-  pull-request-android-smoke:
-    needs: [prepare-lockfile, quality]
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-    uses: ./.github/workflows/android-emulator-diagnose.yml
+
+  quality:
+    needs: prepare-lockfile
+    if: ${{ needs.prepare-lockfile.outputs.reason == 'documentation-only' }}
+    uses: ./.github/workflows/quality.yml
     with:
       source_sha: ${{ needs.prepare-lockfile.outputs.source_sha }}
-      source_label: pull-request
 
-  cleanup-merged-stage-branches:
-    needs: quality
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-      - name: Delete only the four merged stage branches
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
-          branches=(
-            codex/stage-1
-            codex/stage-2-connection-settings
-            codex/stage-3-downloads
-            codex/stage-4-signing-delivery
-          )
-          for branch in "${branches[@]}"; do
-            ref="refs/heads/$branch"
-            live_sha="$(git ls-remote origin "$ref" | cut -f1)"
-            if [ -z "$live_sha" ]; then
-              echo "$branch is already absent; treating it as cleaned."
-              continue
-            fi
-            git fetch --no-tags origin "$ref:refs/remotes/origin/$branch"
-            fetched_sha="$(git rev-parse "refs/remotes/origin/$branch")"
-            if [ "$fetched_sha" != "$live_sha" ]; then
-              echo "$branch changed while checking; refusing branch deletion." >&2
-              exit 1
-            fi
-            if ! git merge-base --is-ancestor "$live_sha" "$GITHUB_SHA"; then
-              echo "$branch is not merged into the pinned main SHA; refusing branch deletion." >&2
-              exit 1
-            fi
-            current_sha="$(git ls-remote origin "$ref" | cut -f1)"
-            if [ "$current_sha" != "$live_sha" ]; then
-              echo "$branch changed after ancestry validation; refusing branch deletion." >&2
-              exit 1
-            fi
-            current_main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
-            if [ "$current_main_sha" != "$GITHUB_SHA" ]; then
-              echo "main moved during cleanup; refusing further branch deletions." >&2
-              exit 1
-            fi
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-            echo "Deleted merged stage branch $branch at $live_sha."
-          done
+  release-quality:
+    needs: prepare-release
+    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
+    uses: ./.github/workflows/quality.yml
+    with:
+      source_sha: ${{ needs.prepare-release.outputs.commit_sha }}
 
   validate-android-signing:
     needs: prepare-lockfile
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ needs.prepare-lockfile.outputs.release == 'true' }}
     runs-on: ubuntu-22.04
     outputs:
       validated: ${{ steps.validate.outputs.validated }}
@@ -208,11 +113,12 @@ jobs:
 
   prepare-release:
     needs: [prepare-lockfile, validate-android-signing]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.validate-android-signing.outputs.validated == 'true' }}
+    if: ${{ needs.prepare-lockfile.outputs.release == 'true' && needs.validate-android-signing.outputs.validated == 'true' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     outputs:
+      ready: ${{ steps.prepare.outputs.ready }}
       version: ${{ steps.prepare.outputs.version }}
       commit_sha: ${{ steps.prepare.outputs.commit_sha }}
       tag: ${{ steps.prepare.outputs.tag }}
@@ -234,131 +140,24 @@ jobs:
           ANDROID_RELEASE_SECRETS_VALIDATED: ${{ needs.validate-android-signing.outputs.validated }}
         run: node scripts/release-orchestrator.mjs prepare
 
-  release-quality:
-    needs: prepare-release
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-release.outputs.commit_sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Check Android test harness syntax on the runner
-        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
-      - name: Verify SAVE recognition against the captured API29 regression screenshot
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr imagemagick
-          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
-      - name: Run Node tests
-        run: npm test
-      - name: Check synchronized app version
-        run: npm run version:check
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-      - name: Smoke-test protected Android keystore generation
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 32)"
-          export ANDROID_KEYSTORE_BASE64=''
-          smoke_dir="$(mktemp -d "$RUNNER_TEMP/keystore-smoke.XXXXXX")"
-          trap 'rm -rf "$smoke_dir"' EXIT
-          node scripts/generate-android-keystore.mjs "$smoke_dir"
-          test -s "$smoke_dir/openwebui-client.p12"
-          test -s "$smoke_dir/keystore-fingerprint.txt"
-          export ANDROID_KEYSTORE_BASE64="$(base64 -w 0 "$smoke_dir/openwebui-client.p12")"
-          node scripts/validate-android-keystore.mjs
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-      - name: Check Rust formatting
-        run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all
-          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
-          git diff --binary > "$RUNNER_TEMP/rustfmt.patch"
-          git diff --exit-code
-      - name: Upload runner-generated formatting suggestions
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustfmt-${{ github.job }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/rustfmt.patch
-          if-no-files-found: ignore
-          retention-days: 1
-
-  candidate-quality:
-    needs: [prepare-lockfile, validate-android-signing]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'candidate' && needs.validate-android-signing.outputs.validated == 'true' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Check Android test harness syntax on the runner
-        run: python3 -m py_compile scripts/android-emulator-smoke.py scripts/android-native-experience.py
-      - name: Verify SAVE recognition against the captured API29 regression screenshot
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr imagemagick
-          python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
-      - name: Run Node tests
-        run: npm test
-      - name: Check synchronized app version
-        run: npm run version:check
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-      - name: Check Rust formatting
-        run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all
-          cargo fmt --manifest-path src-tauri/plugins/connection-controls/Cargo.toml
-          git diff --binary > "$RUNNER_TEMP/rustfmt.patch"
-          git diff --exit-code
-      - name: Upload runner-generated formatting suggestions
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustfmt-${{ github.job }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/rustfmt.patch
-          if-no-files-found: ignore
-          retention-days: 1
-
   release-emulator-smoke:
     needs: [prepare-release, release-quality]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && inputs.skip_emulator != true }}
+    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
     uses: ./.github/workflows/android-emulator-diagnose.yml
     with:
       source_sha: ${{ needs.prepare-release.outputs.commit_sha }}
       source_label: release-pinned
 
-  candidate-emulator-smoke:
-    needs: [prepare-lockfile, candidate-quality, validate-android-signing]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'candidate' && needs.validate-android-signing.outputs.validated == 'true' }}
-    uses: ./.github/workflows/android-emulator-diagnose.yml
-    with:
-      source_sha: ${{ needs.prepare-lockfile.outputs.source_sha }}
-      source_label: candidate
-
   windows:
     needs: [prepare-release, release-quality]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' }}
+    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
     runs-on: windows-2025
+    env:
+      RELEASE_COMMIT_SHA: ${{ needs.prepare-release.outputs.commit_sha }}
+      RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+      RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+    outputs:
+      artifact_id: ${{ steps.upload-release.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -447,23 +246,30 @@ jobs:
           } else {
             Add-Content $env:GITHUB_STEP_SUMMARY 'The installer is retained as an internal UNVERIFIED artifact after post-build validation failed. It cannot enter a Release.'
           }
+      - name: Record windows package provenance
+        if: steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome == 'success'
+        run: node scripts/artifact-integrity.mjs stage windows artifacts
       - uses: actions/upload-artifact@v4
+        id: upload-release
         if: steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome == 'success'
         with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64
-          path: artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
+          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          retention-days: 14
+          path: |
+            artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
+            artifacts/windows.manifest.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always() && steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome != 'success'
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
           path: artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
-          retention-days: 3
+          retention-days: 14
           if-no-files-found: error
 
   macos:
     needs: [prepare-release, release-quality]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' }}
+    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -472,6 +278,12 @@ jobs:
             target: aarch64-apple-darwin
             arch: arm64
     runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_COMMIT_SHA: ${{ needs.prepare-release.outputs.commit_sha }}
+      RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+      RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+    outputs:
+      artifact_id: ${{ steps.upload-release.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -547,27 +359,39 @@ jobs:
           else
             echo 'The DMG is retained as an internal UNVERIFIED artifact after a post-build check failed. It cannot enter a Release.' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Record macos package provenance
+        if: steps.macos-dmg-staged.outcome == 'success' && steps.rust-library-tests.outcome == 'success' && steps.verify-macos-icon.outcome == 'success'
+        run: node scripts/artifact-integrity.mjs stage macos artifacts
       - uses: actions/upload-artifact@v4
+        id: upload-release
         if: steps.macos-dmg-staged.outcome == 'success' && steps.rust-library-tests.outcome == 'success' && steps.verify-macos-icon.outcome == 'success'
         with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}
-          path: artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
+          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          retention-days: 14
+          path: |
+            artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
+            artifacts/macos.manifest.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always() && steps.macos-dmg-staged.outcome == 'success' && (steps.rust-library-tests.outcome != 'success' || steps.verify-macos-icon.outcome != 'success')
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
           path: artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
-          retention-days: 3
+          retention-days: 14
           if-no-files-found: error
 
   android:
     needs: [prepare-release, release-quality, validate-android-signing]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.validate-android-signing.outputs.validated == 'true' }}
+    if: ${{ needs.prepare-release.outputs.ready == 'true' && needs.validate-android-signing.outputs.validated == 'true' }}
     runs-on: ubuntu-22.04
     env:
+      RELEASE_COMMIT_SHA: ${{ needs.prepare-release.outputs.commit_sha }}
+      RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+      RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
       ANDROID_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
       ANDROID_RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+    outputs:
+      artifact_id: ${{ steps.upload-release.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -580,6 +404,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        with:
+          cache-provider: basic
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -596,6 +423,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
           cache-on-failure: true
+          key: android-arm64
       - name: Install frontend dependencies
         run: npm ci
       - name: Fetch locked Rust dependencies
@@ -678,186 +506,30 @@ jobs:
           else
             echo "The signed APK was retained as an internal UNVERIFIED artifact because Android unit or package validation failed or did not complete. It cannot enter a Release." >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Record android package provenance
+        if: steps.release-apk-staged.outcome == 'success' && steps.android-plugin-tests.outcome == 'success' && steps.verify-release-apk.outcome == 'success'
+        run: node scripts/artifact-integrity.mjs stage android artifacts
       - uses: actions/upload-artifact@v4
+        id: upload-release
         if: steps.release-apk-staged.outcome == 'success' && steps.android-plugin-tests.outcome == 'success' && steps.verify-release-apk.outcome == 'success'
         with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-vc${{ needs.prepare-release.outputs.version_code }}
-          path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
+          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-vc${{ needs.prepare-release.outputs.version_code }}-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          retention-days: 14
+          path: |
+            artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
+            artifacts/android.manifest.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always() && steps.release-apk-staged.outcome == 'success' && (steps.android-plugin-tests.outcome != 'success' || steps.verify-release-apk.outcome != 'success')
         with:
           name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
           path: artifacts/Open-WebUI-Client-*-android-arm64-vc*.apk
-          retention-days: 3
+          retention-days: 14
           if-no-files-found: error
-
-  android-candidate:
-    needs: [prepare-lockfile, validate-android-signing, candidate-quality]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'candidate' && needs.validate-android-signing.outputs.validated == 'true' }}
-    runs-on: ubuntu-22.04
-    env:
-      ANDROID_NDK_VERSION: 28.2.13676358
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-lockfile.outputs.source_sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - name: Install pinned Android SDK components
-        id: android-version
-        shell: bash
-        run: |
-          set -euo pipefail
-          version_code=$((1000 + GITHUB_RUN_NUMBER))
-          if [ "$version_code" -gt 2100000000 ]; then
-            echo "Candidate versionCode exceeds Android's supported maximum." >&2
-            exit 1
-          fi
-          echo "ANDROID_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
-          echo "ANDROID_RELEASE_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
-          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-          cache-on-failure: true
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Fetch locked Rust dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
-          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
-      - name: Initialize Android project
-        run: npm run tauri -- android init --ci
-      - name: Decode the existing release keystore
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/android-signing"
-          chmod 700 "$RUNNER_TEMP/android-signing"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/android-signing/release.p12"
-          chmod 600 "$RUNNER_TEMP/android-signing/release.p12"
-          test -s "$RUNNER_TEMP/android-signing/release.p12"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/android-signing/release.p12" >> "$GITHUB_ENV"
-      - name: Prepare Android manifest and candidate signing
-        run: node scripts/prepare-android.mjs
-      - name: Build signed ARM64 Android candidate
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: openwebui-client
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: npm run tauri -- android build --apk --target aarch64
-      - name: Stage candidate APK before post-build validation
-        id: candidate-metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
-          mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*release*')
-          test "${#apks[@]}" -eq 1 || { echo "Expected one ARM64 candidate APK, found ${#apks[@]}" >&2; exit 1; }
-          mkdir -p artifacts
-          artifact="Open-WebUI-Client-${version}-candidate-android-arm64-vc${ANDROID_VERSION_CODE}-run${GITHUB_RUN_NUMBER}.apk"
-          cp "${apks[0]}" "artifacts/${artifact}"
-          cat > artifacts/README.txt <<EOF
-          PACKAGE CHECKS PENDING
-
-          App version: ${version}
-          Android versionCode: ${ANDROID_VERSION_CODE}
-          Source SHA: ${{ needs.prepare-lockfile.outputs.source_sha }}
-          Package: local.openwebui.client (ARM64)
-          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-          API 29 evidence artifact: android-emulator-evidence-api-29-${GITHUB_RUN_ID}
-          API 36 evidence artifact: android-emulator-evidence-api-36-${GITHUB_RUN_ID}
-
-          This is a test-only signed APK, not a Release. Do not install it if the workflow marks it UNVERIFIED.
-          Real-device acceptance is pending. Emulator status is separate; inspect candidate-emulator-smoke and its API 29 and API 36 evidence artifacts.
-          EOF
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Signed Android candidate staged"
-            echo "- App version: ${version} (source unchanged; no version bump, tag or Release)"
-            echo "- Android versionCode: ${ANDROID_VERSION_CODE} (1000 + workflow run number)"
-            echo "- Artifact: ${artifact} (UNVERIFIED test candidate)"
-            echo "- Source: ${{ needs.prepare-lockfile.outputs.source_sha }}"
-            echo "- Package checks and API 29/36 emulator smoke are separate gates; see their steps and evidence artifacts."
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Run Android connection-controls unit tests
-        id: android-plugin-tests
-        working-directory: src-tauri/gen/android
-        env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-signing/release.p12
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: openwebui-client
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_RELEASE_VERSION_CODE: ${{ steps.android-version.outputs.version_code }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          projects="$(./gradlew projects --console=plain)"
-          printf '%s\n' "$projects"
-          mapfile -t plugin_projects < <(printf '%s\n' "$projects" | sed -nE "s/.*Project '(:[^']*connection[-_]controls[^']*)'.*/\1/p" | sort -u)
-          if [ "${#plugin_projects[@]}" -ne 1 ]; then
-            echo "Expected one generated Gradle project for connection-controls; matching paths were: ${plugin_projects[*]:-(none)}" >&2
-            exit 1
-          fi
-          ./gradlew "${plugin_projects[0]}:testDebugUnitTest" --console=plain
-      - name: Verify signature, official icons and Android metadata
-        id: verify-candidate-apk
-        if: always() && steps.candidate-metadata.outcome == 'success'
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*release*')
-          test "${#apks[@]}" -eq 1 || { echo "Expected one ARM64 candidate APK, found ${#apks[@]}" >&2; exit 1; }
-          node scripts/verify-android-apk.mjs "${apks[0]}" "$ANDROID_VERSION_CODE"
-          git diff --exit-code -- src-tauri/Cargo.lock
-      - name: Report candidate package validation
-        if: always() && steps.candidate-metadata.outcome == 'success'
-        shell: bash
-        run: |
-          if [ "${{ steps.android-plugin-tests.outcome }}" = "success" ] && [ "${{ steps.verify-candidate-apk.outcome }}" = "success" ]; then
-            sed -i '1c\CANDIDATE PACKAGE CHECKS PASSED' artifacts/README.txt
-            echo "The candidate passed Android unit, signature, metadata and icon checks. Physical-device acceptance remains pending; emulator status is separate." >> "$GITHUB_STEP_SUMMARY"
-          else
-            sed -i '1c\UNVERIFIED CANDIDATE — DO NOT INSTALL' artifacts/README.txt
-            echo "The built APK is retained as an internal UNVERIFIED artifact because Android unit or package validation failed or did not complete. Do not install or distribute it." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: actions/upload-artifact@v4
-        if: always() && steps.candidate-metadata.outcome == 'success'
-        with:
-          name: Open-WebUI-Client-candidate-${{ steps.candidate-metadata.outputs.version }}-android-arm64-vc${{ steps.android-version.outputs.version_code }}-run${{ github.run_id }}
-          path: artifacts/
-          retention-days: 3
-          if-no-files-found: error
-      - name: Remove temporary signing file
-        if: always()
-        shell: bash
-        run: rm -f "$RUNNER_TEMP/android-signing/release.p12"
 
   publish-release:
     needs: [prepare-release, release-quality, windows, macos, android, release-emulator-smoke]
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'release' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
+    if: ${{ always() && needs.prepare-release.outputs.ready == 'true' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -870,15 +542,18 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@v4
         with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64
+          artifact-ids: ${{ needs.windows.outputs.artifact_id }}
+          merge-multiple: true
           path: release-inputs
       - uses: actions/download-artifact@v4
         with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-arm64
+          artifact-ids: ${{ needs.macos.outputs.artifact_id }}
+          merge-multiple: true
           path: release-inputs
       - uses: actions/download-artifact@v4
         with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-android-arm64-vc${{ needs.prepare-release.outputs.version_code }}
+          artifact-ids: ${{ needs.android.outputs.artifact_id }}
+          merge-multiple: true
           path: release-inputs
       - name: Publish version-pinned release after all platforms succeed
         env:
@@ -894,3 +569,29 @@ jobs:
           RELEASE_ANDROID_RESULT: ${{ needs.android.result }}
           RELEASE_ARTIFACT_DIR: release-inputs
         run: node scripts/release-orchestrator.mjs publish
+
+  timing-summary:
+    needs: [prepare-lockfile, quality, validate-android-signing, prepare-release, release-quality, windows, macos, android, release-emulator-smoke, publish-release]
+    if: always()
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+    steps:
+      - name: Summarize release phases and outcomes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs.json"
+          python3 - <<'PYCODE'
+          import datetime, json, os
+          jobs = json.load(open(os.environ['RUNNER_TEMP']+'/jobs.json'))['jobs']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('| Phase | Result | Seconds |\n|---|---|---:|\n')
+              for job in jobs:
+                  start, end = job.get('started_at'), job.get('completed_at')
+                  if start and end:
+                      seconds = int((datetime.datetime.fromisoformat(end.replace('Z','+00:00'))-datetime.datetime.fromisoformat(start.replace('Z','+00:00'))).total_seconds())
+                      out.write(f"| {job['name']} | {job['conclusion']} | {seconds} |\n")
+          PYCODE

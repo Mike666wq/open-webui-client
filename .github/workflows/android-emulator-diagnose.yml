@@ -1,28 +1,6 @@
 name: Android emulator startup diagnosis
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/android-emulator-diagnose.yml'
-      - 'scripts/android-emulator-smoke.py'
-      - 'scripts/select-android-smoke-source.mjs'
-      - 'scripts/select-android-smoke-source.test.mjs'
-      - 'scripts/download-bridge.js'
-      - 'scripts/link-bridge.js'
-      - 'scripts/prepare-assets.mjs'
-      - 'scripts/generate-android-bridges.mjs'
-      - 'scripts/android-icons.mjs'
-      - 'public/**'
-      - 'src/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.js'
-      - 'client.config.json'
-      - 'src-tauri/**'
-      - 'scripts/prepare-android.mjs'
-      - 'scripts/generate-client-config.mjs'
   workflow_dispatch:
     inputs:
       source:
@@ -95,6 +73,10 @@ jobs:
     needs: choose-source
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    outputs:
+      artifact_id: ${{ steps.upload-apk.outputs.artifact-id }}
+      version: ${{ steps.metadata.outputs.version }}
+      version_code: ${{ steps.signing.outputs.version_code }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,6 +94,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        with:
+          cache-provider: basic
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -129,6 +114,7 @@ jobs:
         with:
           workspaces: app-source/src-tauri -> target
           cache-on-failure: true
+          key: android-x86_64
       - name: Install locked frontend dependencies
         working-directory: app-source
         run: npm ci
@@ -181,9 +167,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-local-interface-${{ github.run_id }}
+          name: android-local-interface-${{ github.run_id }}-attempt${{ github.run_attempt }}
           path: app-source/dist/
-          retention-days: 1
+          retention-days: 14
           if-no-files-found: ignore
       - name: Run Android connection-controls unit tests
         working-directory: app-source/src-tauri/gen/android
@@ -227,11 +213,23 @@ jobs:
         shell: bash
         run: |
           node scripts/verify-android-apk.mjs "$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk" --icons-only
+      - name: Record diagnostic APK provenance
+        id: metadata
+        working-directory: app-source
+        env:
+          RELEASE_COMMIT_SHA: ${{ needs.choose-source.outputs.source_sha }}
+          RELEASE_VERSION_CODE: ${{ steps.signing.outputs.version_code }}
+        run: |
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")"
+          export RELEASE_VERSION="$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          node ../scripts/artifact-integrity.mjs stage diagnostic "$RUNNER_TEMP/android-diagnostic-apk"
       - uses: actions/upload-artifact@v4
+        id: upload-apk
         with:
-          name: android-emulator-diagnostic-apk-${{ github.run_id }}
-          path: ${{ runner.temp }}/android-diagnostic-apk/diagnostic-x86_64.apk
-          retention-days: 1
+          name: android-emulator-diagnostic-apk-${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-diagnostic-apk/
+          retention-days: 14
           if-no-files-found: error
 
   emulator-smoke:
@@ -268,7 +266,8 @@ jobs:
         run: sdkmanager "system-images;android-${{ matrix.api }};google_apis;x86_64"
       - uses: actions/download-artifact@v4
         with:
-          name: android-emulator-diagnostic-apk-${{ github.run_id }}
+          artifact-ids: ${{ needs.build-x86_64-test-apk.outputs.artifact_id }}
+          merge-multiple: true
           path: ${{ runner.temp }}/android-diagnostic-apk
       - name: Enable KVM access on the ephemeral runner
         shell: bash
@@ -377,16 +376,26 @@ jobs:
           timeout 15s adb shell settings put global animator_duration_scale 0
           boot_success=1
           echo "Android emulator connected and booted successfully before the 420-second deadline."
-      - name: Install APK and run cold-start, idle and lifecycle checks
+      - name: Verify and install the diagnostic APK
+        env:
+          RELEASE_COMMIT_SHA: ${{ needs.choose-source.outputs.source_sha }}
+          RELEASE_VERSION: ${{ needs.build-x86_64-test-apk.outputs.version }}
+          RELEASE_VERSION_CODE: ${{ needs.build-x86_64-test-apk.outputs.version_code }}
+        run: |
+          node scripts/artifact-integrity.mjs verify diagnostic "$RUNNER_TEMP/android-diagnostic-apk"
+          adb install "$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk"
+      - name: Verify Android native chrome and real connection interactions
+        if: ${{ needs.choose-source.outputs.source_kind != 'v0.2.2-baseline' }}
+        shell: bash
+        run: |
+          python scripts/android-native-experience.py --output "$RUNNER_TEMP/android-emulator-evidence/native-ui"
+      - name: Run cold-start, idle and lifecycle checks
         shell: bash
         env:
           ANDROID_SMOKE_SOURCE_SHA: ${{ needs.choose-source.outputs.source_sha }}
           ANDROID_SMOKE_API: ${{ matrix.api }}
         run: |
           set -euo pipefail
-          apk="$RUNNER_TEMP/android-diagnostic-apk/diagnostic-x86_64.apk"
-          test -s "$apk"
-          adb install "$apk"
           python scripts/android-emulator-smoke.py \
             --output "$RUNNER_TEMP/android-emulator-evidence" \
             --api "$ANDROID_SMOKE_API" \
@@ -397,18 +406,13 @@ jobs:
             echo "- API level: $ANDROID_SMOKE_API"
             echo "- The script records the idle baseline and supplementary interaction result separately."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify Android native chrome and real connection interactions
-        if: ${{ needs.choose-source.outputs.source_kind != 'v0.2.2-baseline' }}
-        shell: bash
-        run: |
-          python scripts/android-native-experience.py --output "$RUNNER_TEMP/android-emulator-evidence/native-ui"
       - name: Upload filtered diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-emulator-evidence-api-${{ matrix.api }}-${{ github.run_id }}
+          name: android-emulator-evidence-api-${{ matrix.api }}-${{ github.run_id }}-attempt${{ github.run_attempt }}
           path: ${{ runner.temp }}/android-emulator-evidence/
-          retention-days: 3
+          retention-days: 14
           if-no-files-found: warn
       - name: Stop Android emulator
         if: always()

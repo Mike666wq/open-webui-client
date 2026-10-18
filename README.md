@@ -22,15 +22,15 @@ Android 默认隐藏顶部状态栏，边缘滑动可临时显示；底部系统
 
 页面中的明确下载会交给应用保存流程处理。普通图片、媒体预览、没有下载属性的链接，以及同源内部链接继续在 WebView 中打开，不会因为预览而误弹保存对话框。Android 选择保存位置时使用系统文件选择器；文件 URI 和路径不会交给网页脚本。不同设备和文件 provider 的实际保存、取消与清理结果仍待真机验收。
 
-首版不提供后台通知、自动更新或正式桌面付费签名。Android push/PR 中的 debug 编译仅验证构建，不上传为交付 APK；release APK 必须使用维护者管理的固定 keystore。
+首版不提供后台通知、自动更新或正式桌面付费签名。PR 只执行快速源码检查，不编译 APK；release APK 必须使用维护者管理的固定 keystore。
 
 ## 版本
 
-每次发布时，稳定语义版本会同步写入 `package.json`、Cargo、Tauri 和两份锁文件；当前发布版本请查看[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)。运行 `npm run version:check` 检查一致性；准备新版本时使用 `node scripts/manage-version.mjs bump patch`（也支持 `minor`、`major` 或明确的递增 `X.Y.Z`）。源码中的 Android `versionCode` 为 debug 占位值 `2`。只有从 `main` 手动运行 Android release 时，CI 才将生成 Gradle 工程的 release `defaultConfig.versionCode` 设为 `1000 + github.run_number`；重跑同一 workflow run 使用同一代码，任何新 run 都递增。release APK 名称和 artifact 会包含该 versionCode。
+每次发布时，稳定语义版本会同步写入 `package.json`、Cargo、Tauri 和两份锁文件；当前发布版本请查看[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)。运行 `npm run version:check` 检查一致性；准备新版本时使用 `node scripts/manage-version.mjs bump patch`（也支持 `minor`、`major` 或明确的递增 `X.Y.Z`）。源码中的 Android `versionCode` 为 debug 占位值 `2`。合并到 `main` 后自动发布（或手动恢复发布）时，CI 才将生成 Gradle 工程的 release `defaultConfig.versionCode` 设为 `1000 + github.run_number`；重跑同一 workflow run 使用同一代码，任何新 run 都递增。release APK 名称和 artifact 会包含该 versionCode。
 
 ## 构建
 
-在 GitHub Actions 的 **Build desktop and Android packages** 页面选择 `main`，手动选择 `candidate` 或 `release`。`candidate` 不递增版本、不创建 tag 或 Release；它提供三天后过期、由现有 Android keystore 签名的 ARM64 APK Actions artifact，构建不等待 emulator 检查；检查结果在同一 run 单独报告。若 APK 后置验证失败，artifact 会标为 UNVERIFIED，只供内部排查，不应安装或分发。通过包验证后可在 Redmi 上覆盖安装现有固定签名版本。正式 Release 仍要求 API 29/36 emulator 与三端构建全部成功。`release` 会自动递增 patch 并提交 `main`，之后质量检查、Windows NSIS、macOS ARM64 DMG 和 Android ARM64 签名 APK 都使用同一提交；Android versionCode 按 `1000 + github.run_number` 生成，只有所有门禁成功后才公开 Release。模拟器通过不能替代 Redmi 真机验收；当前仍未完成 Redmi 启动稳定性验证。main push 运行 Node/version、JDK keystore smoke、Rust formatting 质量检查和已合入旧 stage 分支的受限清理；触及 app 行为文件的 push 还会触发独立 Android emulator 诊断，不自动发版。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 首次打开可能需要对该应用单独使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。
+PR 执行 **Pull request quick checks**，检查源码、前端构建、版本、工作流语法及固定截图回归，不构建 APK、不读取发布密钥。合并 main 后，**Build desktop and Android packages** 自动递增 patch，固定源码 SHA，并行构建三端包与完整 API29/36 模拟器验收；全部成功后公开 Release。仅文档修改不发版。正在发布的版本不会被取消；等待中的过期提交跳过，最新 main 最终验收。需要恢复时优先使用 Actions 的 Re-run failed jobs；同一次运行保留版本、versionCode 和已构建 APK，产物及校验清单保留14天。自动候选包和独立 push 诊断已取消；手动 **Android emulator startup diagnosis** 仍可选择当前源码或基线。模拟器通过不代表 HyperOS 真机验收完成。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 保留现有安装方式。
 
 首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。用 Windows PowerShell 将备份 keystore 编码到剪贴板，然后只需再设置 `ANDROID_KEYSTORE_BASE64` secret。固定别名是 `openwebui-client`，key password 复用 `ANDROID_KEYSTORE_PASSWORD`，不需要另外两个冗余 secret。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 Base64 keystore 时 workflow 会拒绝重生成。
 
