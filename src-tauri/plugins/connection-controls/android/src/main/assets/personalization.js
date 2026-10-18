@@ -6,6 +6,7 @@
   const doc = document;
   const key = 'owc-personalization-style';
   const marker = 'data-owc-appearance';
+  const surfaceMarker = 'data-owc-appearance-surface';
   const root = doc.documentElement;
   const chat = doc.querySelector('#chat-container');
   const messages = chat?.querySelector('#messages-container');
@@ -21,8 +22,11 @@
   }) : [];
   // IDs identify the currently mounted branch; never request hidden history.
   const branch = JSON.stringify(rows.map(node => node.id));
+  const clearSurfaces = () => {
+    doc.querySelectorAll(`[${surfaceMarker}]`).forEach(node => node.removeAttribute(surfaceMarker));
+  };
   const cleanup = () => {
-    doc.getElementById(key)?.remove(); root.removeAttribute(marker);
+    doc.getElementById(key)?.remove(); root.removeAttribute(marker); clearSurfaces();
   };
   if (!supported || !request.config?.enabled) cleanup();
   else {
@@ -40,6 +44,7 @@
     const scope = `html[${marker}]`;
     const css = `
 ${scope}, ${scope} body { background:transparent!important; color:${text}!important; color-scheme:${dark ? 'dark' : 'light'}; }
+${scope} [${surfaceMarker}] { background-color:transparent!important; background-image:none!important; }
 ${scope} body > #app, ${scope} #app > div, ${scope} #chat-container,
 ${scope} #chat-container > div, ${scope} #chat-container > div > div,
 ${scope} #chat-container > div > div > div, ${scope} #chat-pane,
@@ -60,6 +65,13 @@ ${scope} #chat-input { color:${text}!important; caret-color:${accent}; }
     if (!style) { style = doc.createElement('style'); style.id = key; (doc.head || root).appendChild(style); }
     if (style.textContent !== css) style.textContent = css;
     if (!root.hasAttribute(marker)) root.setAttribute(marker, '');
+    clearSurfaces();
+    // Open WebUI paints an opaque application shell above the native WebView
+    // background. Mark only the current chat's ancestor chain so a wallpaper
+    // remains visible without changing login, administration or sidebar pages.
+    for (let node = chat.parentElement; node && node !== root; node = node.parentElement) {
+      node.setAttribute(surfaceMarker, '');
+    }
   }
   let jumped = false;
   if (supported && request.jump && request.page === page && request.branch === branch) {

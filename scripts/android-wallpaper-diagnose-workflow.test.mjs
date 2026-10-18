@@ -29,4 +29,7 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /failure-logcat\.txt/);
   assert.match(script, /def tap_after_scroll/);
   assert.match(script, /set_slider_to_start/);
+  assert.match(script, /#app \{ min-height: 100dvh; background: #fff; \}/);
+  assert.match(script, /#chat-container \{ background: #fff; \}/);
+  assert.doesNotMatch(script, /background: transparent; \}/);
 });

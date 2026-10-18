@@ -74,10 +74,13 @@ class Fixture(BaseHTTPRequestHandler):
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; min-height: 100%; background: transparent; color: #111827; }
-  #app, #app > div, #chat-container, #chat-container > div,
-  #chat-container > div > div, #chat-container > div > div > div,
-  #chat-pane, #messages-container { background: transparent; }
+  html { margin: 0; min-height: 100%; background: #e2eaf6; }
+  body { margin: 0; min-height: 100%; background: #fff; color: #111827; }
+  #app { min-height: 100dvh; background: #fff; }
+  #app > main { display: contents; }
+  #chat-container { background: #fff; }
+  #chat-container > div, #chat-container > div > div { background: #fff; }
+  #chat-container > div > div > div { background: #fff; }
   #chat-container { min-height: 100dvh; display: flex; flex-direction: column; }
   #chat-container > div { min-height: 0; flex: 1; display: flex; flex-direction: column; }
   #chat-pane { min-height: 0; flex: 1; display: flex; flex-direction: column; }
@@ -88,14 +91,14 @@ class Fixture(BaseHTTPRequestHandler):
   #message-input-container { padding: 12px; background: rgba(255,255,255,.82); }
   #chat-input { width: 100%; min-height: 48px; border: 1px solid #64748b; border-radius: 12px; padding: 10px; }
 </style></head>
-<body><div id="app"><div><div id="chat-container"><div><div><div><div id="chat-pane">
+<body><div id="app"><main><div id="chat-container"><div><div><div><div id="chat-pane">
   <nav><strong id="fixture-header">Wallpaper fixture 8765</strong></nav>
   <div id="messages-container">
     <div class="user-message" id="message-wallpaper-1"><div class="rounded-3xl"><div class="markdown-prose">Verify the selected local wallpaper.</div></div></div>
     <div class="user-message" id="message-wallpaper-2"><div class="rounded-3xl"><div class="markdown-prose">The image should be visible through this transparent chat surface.</div></div></div>
   </div>
   <div id="message-input-container"><textarea id="chat-input" aria-label="Message">wallpaper diagnostic</textarea></div>
-</div></div></div></div></div></div></div></body></html>"""
+</div></div></div></div></div></main></div></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -547,7 +550,11 @@ def main():
                 node.get("text", "") + " " + node.get("content-desc", "")
                 for node in hierarchy(output, "after-image-import")
             )
-            if "Importing" not in text and "Choose image" in text:
+            if (
+                "Importing" not in text
+                and "Choose image" in text
+                and "Apply" in text
+            ):
                 break
             time.sleep(1)
         else:
