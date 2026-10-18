@@ -206,10 +206,28 @@ jobs:
           sha256sum --check SHA256SUMS
           adb install -r wallpaper-diagnostic.apk
       - name: Run real Android wallpaper workflow
+        shell: bash
         run: |
+          set +e
           python scripts/android-wallpaper-diagnose.py \
             --output "$RUNNER_TEMP/android-wallpaper-evidence" \
-            --source-sha "$GITHUB_SHA"
+            --source-sha "$GITHUB_SHA" 2>&1 | tee "$RUNNER_TEMP/android-wallpaper-evidence.log"
+          status=${PIPESTATUS[0]}
+          {
+            echo "## Android wallpaper diagnosis"
+            echo
+            if [ "$status" -eq 0 ]; then
+              echo "**PASS** — the selected local image was visible in the Android WebView."
+            else
+              echo "**FAIL** — see the sanitized failure below."
+              echo
+              echo '```text'
+              grep -E 'ANDROID_WALLPAPER_DIAGNOSE_(PASS|FAILED):|DiagnosisFailure:|AssertionError:|Error:|Traceback' \
+                "$RUNNER_TEMP/android-wallpaper-evidence.log" | tail -20 || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
