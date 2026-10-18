@@ -210,37 +210,7 @@ def tap_exact(output, label, *, timeout=30):
 
 
 def tap_picker(output):
-    deadline = time.monotonic() + 20
-    node = None
-    while time.monotonic() < deadline:
-        for item in hierarchy(output, "appearance-row"):
-            if item.get("text") == "Appearance & reading" or item.get("content-desc") == "Appearance & reading":
-                node = item
-                break
-        if node is not None:
-            break
-        time.sleep(1)
-    if node is None:
-        raise DiagnosisFailure("Missing UI control: Appearance & reading")
-    # A modal/dialog parent can expose a merged full-screen accessibility node
-    # carrying a child button's label. Tapping that node's center would hit the
-    # page underneath. The menu row is explicitly laid out beneath its heading;
-    # use the nearest clickable descendant or row-center fallback.
-    candidates = []
-    for item in hierarchy(output, "appearance-row-candidates"):
-        if "Appearance & reading" not in (
-            item.get("text", ""),
-            item.get("content-desc", ""),
-        ):
-            continue
-        item_bounds = bounds(item)
-        if item.get("clickable") == "true" or item.get("class", "").endswith("Button"):
-            candidates.append(item)
-    target = min(candidates, key=lambda item: bounds(item)[1], default=node)
-    target_bounds = bounds(target)
-    x = (target_bounds[0] + target_bounds[2]) // 2
-    y = target_bounds[1] + min(28, (target_bounds[3] - target_bounds[1]) // 2)
-    shell(f"input tap {x} {y}")
+    tap_after_scroll(output, "Appearance & reading", timeout=20)
 
 
 def tap_one(output, labels, *, timeout=30):
@@ -300,15 +270,58 @@ def select_wallpaper(output):
 
 
 def set_slider_to_start(output, label):
-    node = find(
-        output,
-        label,
-        predicate=lambda item: item.get("class", "").endswith("SeekBar"),
-    )
+    predicate = lambda item: item.get("class", "").endswith("SeekBar")
+    try:
+        node = find(output, label, timeout=2, predicate=predicate)
+    except DiagnosisFailure:
+        size = shell("wm size")
+        dimensions = re.findall(r"(\d+)x(\d+)", size)
+        if not dimensions:
+            raise DiagnosisFailure(f"Could not determine emulator size: {size}")
+        width, height = map(int, dimensions[-1])
+        x = width // 2
+        node = None
+        for _ in range(6):
+            shell(
+                f"input swipe {x} {int(height * .72)} "
+                f"{x} {int(height * .3)} 350"
+            )
+            try:
+                node = find(output, label, timeout=0.5, predicate=predicate)
+                break
+            except DiagnosisFailure:
+                continue
+        if node is None:
+            raise DiagnosisFailure(
+                f"Could not scroll the appearance panel to {label}"
+            )
     left, top, right, bottom = bounds(node)
     y = (top + bottom) // 2
     shell(f"input swipe {right - 4} {y} {left + 2} {y} 250")
     time.sleep(0.4)
+
+
+def tap_after_scroll(output, label, *, timeout=12):
+    try:
+        return tap_exact(output, label, timeout=2)
+    except DiagnosisFailure:
+        size = shell("wm size")
+        dimensions = re.findall(r"(\d+)x(\d+)", size)
+        if not dimensions:
+            raise DiagnosisFailure(f"Could not determine emulator size: {size}")
+        width, height = map(int, dimensions[-1])
+        x = width // 2
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            shell(
+                f"input swipe {x} {int(height * .72)} "
+                f"{x} {int(height * .3)} 350"
+            )
+            try:
+                return tap_exact(output, label, timeout=0.5)
+            except DiagnosisFailure:
+                continue
+        raise DiagnosisFailure(f"Could not scroll the panel to {label}")
 
 
 def enable_appearance(output):
@@ -470,7 +483,7 @@ def main():
         marker.write_text("menu-reopened\n", encoding="utf-8")
         tap_picker(output)
         marker.write_text("appearance-reopened\n", encoding="utf-8")
-        tap(output, "Choose image (up to 20 MB)", timeout=20)
+        tap_after_scroll(output, "Choose image (up to 20 MB)", timeout=20)
         marker.write_text("picker-opened\n", encoding="utf-8")
         select_wallpaper(output)
         marker.write_text("picker-selected\n", encoding="utf-8")

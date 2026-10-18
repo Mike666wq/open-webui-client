@@ -27,4 +27,6 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /appearance-config\.json/);
   assert.match(script, /Persisted appearance config or decoded JPEG was not found/);
   assert.match(script, /failure-logcat\.txt/);
+  assert.match(script, /def tap_after_scroll/);
+  assert.match(script, /set_slider_to_start/);
 });
