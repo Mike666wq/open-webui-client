@@ -12,7 +12,7 @@ console.log(greeting);</code></pre><div class="spacer"></div></div></li>
 <script src="adapter.js"></script><script>
 // This fixture mirrors structural hooks only; it is not a copy of Open WebUI UI.
 let snapshot;
-function preview(dark){snapshot=window.fixtureAdapter({origin:location.origin,navigation:true,config:{enabled:true,dark,accent:'#437c78',opacity:80,fontSize:18,lineHeight:175}});document.getElementById('result').textContent=snapshot.supported?'Supported · '+snapshot.entries.length+' questions':'Unsupported';return snapshot;}
+function preview(dark){document.getElementById('native-wallpaper').style.background=dark?'linear-gradient(135deg,#102034,#212131)':'linear-gradient(135deg,#c6dbeb,#ded7f1)';document.getElementById('native-toolbar').style.background=dark?'#111318':'#f8fafc';document.getElementById('native-toolbar').style.color=dark?'#e5e7eb':'#111827';snapshot=window.fixtureAdapter({origin:location.origin,navigation:true,config:{enabled:true,dark,accent:'#437c78',opacity:80,fontSize:18,lineHeight:175}});document.getElementById('result').textContent=snapshot.supported?'Supported · '+snapshot.entries.length+' questions':'Unsupported';return snapshot;}
 function disable(){return window.fixtureAdapter({origin:location.origin,navigation:true,config:{enabled:false}});}
 function jump(){return window.fixtureAdapter({origin:location.origin,navigation:true,config:{enabled:true,dark:false},page:snapshot.page,branch:snapshot.branch,jump:'message-a'});}
 preview(false);

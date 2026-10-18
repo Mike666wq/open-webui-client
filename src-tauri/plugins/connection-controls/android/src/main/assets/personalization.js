@@ -43,7 +43,7 @@ ${scope} #chat-container > div > div > div, ${scope} #chat-pane,
 ${scope} #messages-container { background-color:transparent!important; background-image:none!important; }
 ${scope} #chat-container > div > .pointer-events-none.absolute { display:none!important; }
 ${scope} #chat-container { color:${text}!important; --color-gray-50:${dark ? '#20242c' : '#f8fafc'}; --color-gray-850:${dark ? '#20242c' : '#edf1f7'}; }
-${scope} #chat-container :is(nav, #message-input, .user-message .rounded-3xl), ${scope} #sidebar { background-color:rgba(${surface},${alpha})!important; color:${text}!important; }
+${scope} #messages-container, ${scope} #chat-container :is(nav, #message-input, .user-message .rounded-3xl), ${scope} #sidebar { background-color:rgba(${surface},${alpha})!important; color:${text}!important; }
 ${scope} #chat-container :is(.markdown-prose,.whitespace-pre-wrap) { color:${text}!important; font-size:${clamp(c.fontSize,14,24,16)}px!important; line-height:${clamp(c.lineHeight,130,210,165)/100}!important; }
 ${scope} #chat-container :is(pre,code) { font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important; line-height:1.5!important; }
 ${scope} #chat-container pre { background:${dark ? '#20242c' : '#edf1f7'}!important; color:${text}!important; }
