@@ -256,7 +256,14 @@ def find_image_picker_entry(output, timeout=45):
 def select_wallpaper(output):
     entry = find_image_picker_entry(output, timeout=8)
     if entry is None:
-        tap_one(output, ["Downloads", "Download"], timeout=8)
+        try:
+            tap_one(output, ["Large files"], timeout=2)
+        except DiagnosisFailure:
+            pass
+        try:
+            tap_one(output, ["Downloads", "Download"], timeout=8)
+        except DiagnosisFailure:
+            pass
         entry = find_image_picker_entry(output, timeout=18)
     if entry is None:
         tap_one(output, ["Show roots", "Show navigation drawer", "Open navigation drawer"], timeout=8)
@@ -274,9 +281,24 @@ def select_wallpaper(output):
     # Android's Photos app can open a full-screen preview for a single tap.
     # Use its explicit "Done/Select" action when present; otherwise Back returns
     # the chosen document to ACTION_OPEN_DOCUMENT.
-    deadline = time.monotonic() + 12
+    deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         nodes = hierarchy(output, "image-picker-confirm")
+        labels = {
+            " ".join(
+                value
+                for value in (
+                    node.get("text", ""),
+                    node.get("content-desc", ""),
+                )
+                if value
+            ).casefold()
+            for node in nodes
+        }
+        # A chooser may auto-return after one tap. Do not require its transient
+        # confirmation hierarchy; the caller verifies the appearance sheet.
+        if "appearance & reading" in labels and "choose image" in labels:
+            return
         current = {
             (node.get("text", ""), node.get("content-desc", ""), node.get("bounds", ""))
             for node in nodes
@@ -284,12 +306,6 @@ def select_wallpaper(output):
         if current == before:
             time.sleep(1)
             continue
-        labels = {
-            (node.get("text", "").strip(), node.get("content-desc", "").strip())
-            for node in nodes
-        }
-        if any(IMAGE_NAME in text or IMAGE_NAME in desc for text, desc in labels):
-            return
         for label in ("Done", "Select", "Open", "Add"):
             for node in nodes:
                 if label.casefold() in {
@@ -303,8 +319,7 @@ def select_wallpaper(output):
                 continue
             break
         time.sleep(1)
-    shell("input keyevent KEYCODE_BACK")
-    time.sleep(1)
+    raise DiagnosisFailure("Android document picker did not return the selected image")
 
 
 def set_slider_to_start(output, label):
