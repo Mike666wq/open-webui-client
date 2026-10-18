@@ -76,7 +76,7 @@ internal class PersonalizationController(
             val pin=editorSession
             pendingImport=true; editorStatus?.text=tr("Importing…", "正在导入…")
             work {
-                val imported=runCatching { store.import(uri) }
+                val imported=runCatching { store.importImage(uri) }
                 handler.post {
                     if(disposed || pin!=editorSession || draft==null) imported.getOrNull()?.let(store::delete)
                     else {

@@ -34,7 +34,7 @@ internal class WallpaperStore(private val context: Context) {
     fun delete(name: String) { file(name)?.delete() }
 
     /** Never retain provider URIs, original EXIF, or unbounded decoded images. */
-    fun import(uri: Uri): String {
+    fun importImage(uri: Uri): String {
         val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
             val output = ByteArrayOutputStream(); val buffer = ByteArray(65536)
             while (true) {
