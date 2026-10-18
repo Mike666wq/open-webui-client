@@ -65,6 +65,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private val title = TextView(activity)
     private val subtitle = TextView(activity)
     private val button = ImageButton(activity)
+    private val directoryButton = ImageButton(activity)
+    private var personalization: PersonalizationController? = null
     private var channel: Channel? = null
     private var state = ClientStateArgs()
     private var menu: AlertDialog? = null
@@ -81,11 +83,11 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private val toolbarHeight get() = max(dp(48), title.lineHeight + subtitle.lineHeight + dp(8))
     private var night: Boolean? = null
     private var fontScale = 0f
-    private val dark get() = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    private val dark get() = personalization?.darkOverride ?: (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
     private val surface get() = Color.parseColor(if (dark) "#111318" else "#F8FAFC")
     private val foreground get() = Color.parseColor(if (dark) "#E5E7EB" else "#111827")
     private val secondary get() = Color.parseColor(if (dark) "#A6AFBD" else "#596579")
-    private val accent get() = Color.parseColor(if (dark) "#93B4FF" else "#2563EB")
+    private val accent get() = personalization?.accentOverride ?: Color.parseColor(if (dark) "#93B4FF" else "#2563EB")
     private val fieldSurface get() = Color.parseColor(if (dark) "#20242C" else "#EDF1F7")
     private val chinese get() = ClientPolicy.chinese(activity.resources.configuration.locales[0].language)
     private fun tr(en: String, zh: String) = if (chinese) zh else en
@@ -125,6 +127,11 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         button.background = android.graphics.drawable.RippleDrawable(
             ColorStateList.valueOf(Color.argb(40, 100, 130, 190)), null,
             GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) })
+        directoryButton.contentDescription = tr("Conversation directory", "对话目录")
+        directoryButton.setPadding(dp(12),dp(12),dp(12),dp(12))
+        directoryButton.visibility = View.GONE
+        directoryButton.setOnClickListener { personalization?.showDirectory() }
+        toolbar.addView(directoryButton, LinearLayout.LayoutParams(dp(48),dp(48)))
         toolbar.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)))
         root.addView(toolbar, FrameLayout.LayoutParams(-1, toolbarHeight, Gravity.TOP))
         button.setOnClickListener { showMenu() }
@@ -139,6 +146,9 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         root.addOnLayoutChangeListener { _, l, t, r, b, oldL, oldT, oldR, oldB ->
             if (r-l != oldR-oldL || b-t != oldB-oldT) listOfNotNull(menu, settings, confirmation).forEach { styleDialog(it) }
         }
+        personalization = PersonalizationController(activity, webView, ::builder, { dialog ->
+            dialog.window?.let { immersive(it) }; styleDialog(dialog)
+        }, { updateTheme(force = true) }, { enabled -> directoryButton.visibility = if (enabled) View.VISIBLE else View.GONE })
         root.post { immersive(activity.window); ViewCompat.requestApplyInsets(root) }
     }
 
@@ -206,6 +216,9 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                     }
                     path.close(); canvas.drawPath(path, paint); canvas.drawCircle(12f,12f,3.2f,paint)
                 }
+                "directory" -> {
+                    for (y in arrayOf(6f,12f,18f)) { canvas.drawCircle(4f,y,.7f,paint); canvas.drawLine(9f,y,21f,y,paint) }
+                }
                 "server" -> {
                     canvas.drawRoundRect(4f,4f,20f,10f,2f,2f,paint); canvas.drawRoundRect(4f,14f,20f,20f,2f,2f,paint)
                     canvas.drawPoint(7f,7f,paint); canvas.drawPoint(7f,17f,paint)
@@ -248,12 +261,14 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         toolbar.setBackgroundColor(surface)
         title.setTextColor(foreground); subtitle.setTextColor(secondary)
         button.setImageDrawable(Glyph("settings", foreground))
+        directoryButton.setImageDrawable(Glyph("directory", foreground))
         activity.window.statusBarColor = surface
         activity.window.navigationBarColor = surface
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
         controller.isAppearanceLightNavigationBars = !dark
         controller.isAppearanceLightStatusBars = !dark
         listOfNotNull(menu, settings, confirmation).forEach { styleDialog(it) }
+        personalization?.restyleDialogs()
     }
 
     private fun builder() = AlertDialog.Builder(ContextThemeWrapper(activity,
@@ -295,7 +310,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             dialog.getButton(which)?.apply {
                 isAllCaps = false; minHeight = dp(48); setTextColor(accent)
                 if (which == AlertDialog.BUTTON_POSITIVE) {
-                    setTextColor(if (dark) Color.parseColor("#0D2047") else Color.WHITE)
+                    setTextColor(if (Color.luminance(accent) > .35f) Color.parseColor("#111827") else Color.WHITE)
                     background = GradientDrawable().apply { setColor(accent); cornerRadius = dp(12).toFloat() }
                     setPadding(dp(18), 0, dp(18), 0)
                 }
@@ -326,6 +341,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         if (disposed || next.revision <= state.revision || next.generation < state.generation) return
         val old = state
         state = next
+        personalization?.connection(if (next.phase == "connected") next.candidateUrl ?: next.lastSuccessUrl else null, next.generation)
         updateToolbar()
         if (next.phase == "connected" && clearHistoryGeneration != next.generation) {
             clearHistoryGeneration = next.generation
@@ -350,8 +366,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(16), dp(20), dp(16)) }
         val heading = TextView(activity).apply { text = tr("Client settings", "客户端设置"); textSize = 20f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, dp(12)) }
         content.addView(heading)
-        val labels = arrayOf(tr("Server address", "修改服务地址"), tr("Reload", "重新加载"), tr("Export Android diagnostics", "导出安卓诊断"))
-        val icons = arrayOf("server", "reload", "export")
+        val labels = arrayOf(tr("Server address", "修改服务地址"), tr("Reload", "重新加载"), tr("Export Android diagnostics", "导出安卓诊断"), tr("Appearance & reading", "外观与阅读"))
+        val icons = arrayOf("server", "reload", "export", "settings")
         labels.forEachIndexed { index, label ->
             val row = Button(activity).apply {
                 tag = icons[index]; text = label; isAllCaps = false; textSize = 16f; gravity = Gravity.CENTER_VERTICAL or Gravity.START
@@ -361,7 +377,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                 compoundDrawablePadding = dp(14)
                 setOnClickListener {
                     menu?.dismiss()
-                    when (index) { 0 -> showSettings(); 1 -> confirmLeaving { send("reload") }; 2 -> send("exportDiagnostics") }
+                    when (index) { 0 -> showSettings(); 1 -> confirmLeaving { send("reload") }; 2 -> send("exportDiagnostics"); 3 -> personalization?.showAppearance() }
                 }
             }
             content.addView(row, LinearLayout.LayoutParams(-1, -2))
@@ -450,6 +466,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         if (insets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
             WindowCompat.getInsetsController(activity.window, root).hide(WindowInsetsCompat.Type.ime()); return
         }
+        if (personalization?.dismissTop() == true) return
         if (confirmation?.isShowing == true) { confirmation?.dismiss(); return }
         if (settings?.isShowing == true) { cancelIfConnecting(); settings?.dismiss(); return }
         if (menu?.isShowing == true) { menu?.dismiss(); return }
@@ -470,9 +487,10 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show()
     }
 
-    fun resume() { if (!disposed) { updateTheme(); immersive(activity.window); ViewCompat.requestApplyInsets(root) } }
+    fun resume() { if (!disposed) { personalization?.resume(); updateTheme(); immersive(activity.window); ViewCompat.requestApplyInsets(root) } }
     fun destroy() {
         disposed = true
+        personalization?.destroy(); personalization = null
         confirmation?.dismiss(); settings?.dismiss(); menu?.dismiss()
         channel = null
         root.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)

@@ -35,3 +35,13 @@ PR 执行 **Pull request quick checks**，检查源码、前端构建、版本�
 首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。用 Windows PowerShell 将备份 keystore 编码到剪贴板，然后只需再设置 `ANDROID_KEYSTORE_BASE64` secret。固定别名是 `openwebui-client`，key password 复用 `ANDROID_KEYSTORE_PASSWORD`，不需要另外两个冗余 secret。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 Base64 keystore 时 workflow 会拒绝重生成。
 
 密钥初始化和签名发布步骤详见[构建与签名说明](docs/GITHUB_ACTIONS.md)。
+
+## Android 个性化外观与对话目录
+
+连接服务后，顶部设置面板中的“外观与阅读”提供两个独立开关。新服务默认关闭，配置按服务 origin（协议、主机及非默认端口）保存在当前手机，不同步到账号。
+
+外观支持原生蓝、青灰、暖砂和不透明阅读预设、跟随系统/浅色/深色、本地 JPEG/PNG/WebP 选图、渐变/纯色、裁切位置与缩放、静态模糊、遮罩、面板透明度、强调色、聊天字号及行距。选图上限20MB，处理后长边不超过2560px；只保存应用私有副本，不上传到服务。参数实时预览，点“应用”保存；取消恢复进入前的配置，恢复默认也需要应用确认。修改外观不会重载聊天页面。
+
+启用对话目录后，顶部出现48dp目录入口。底部面板按当前网页已加载的用户提问排列，支持摘要查找与跳转；不会请求完整历史或切换分支，摘要仅留在内存中。
+
+网页样式和消息定位适配器参考固定 Open WebUI 源码结构，详见[兼容样例](scripts/fixtures/personalization/README.md)。识别失败、登录或管理页面保持原网页；可随时关闭外观恢复网页样式。不支持第三方插件、任意脚本/CSS、动态壁纸或远程图库。浏览器样例验证不等于 Android/HyperOS 真机验收。
