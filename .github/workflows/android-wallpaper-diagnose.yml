@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-wallpaper-diagnose-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  group: android-wallpaper-diagnose-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -227,6 +227,13 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            failure="$(grep -E 'ANDROID_WALLPAPER_DIAGNOSE_FAILED:' "$RUNNER_TEMP/android-wallpaper-evidence.log" | tail -1 || true)"
+            failure="${failure//'%'/'%25'}"
+            failure="${failure//$'\r'/'%0D'}"
+            failure="${failure//$'\n'/'%0A'}"
+            echo "::error title=Wallpaper diagnosis failure::${failure:-See uploaded evidence}"
+          fi
           exit "$status"
       - name: Upload screenshots and logs
         if: always()

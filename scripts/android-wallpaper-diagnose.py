@@ -172,13 +172,15 @@ def matches(node, label):
     )
 
 
-def find(output, label, *, timeout=30, exact=False):
+def find(output, label, *, timeout=30, exact=False, predicate=None):
     deadline = time.monotonic() + timeout
     safe_label = re.sub(r"[^A-Za-z0-9_.-]", "-", label)[:40]
     while time.monotonic() < deadline:
         for node in hierarchy(output, safe_label):
             values = (node.get("text", "").casefold(), node.get("content-desc", "").casefold())
-            if (label.casefold() in values) if exact else matches(node, label):
+            if ((label.casefold() in values) if exact else matches(node, label)) and (
+                predicate is None or predicate(node)
+            ):
                 bounds(node)
                 return node
         time.sleep(1)
@@ -251,9 +253,10 @@ def select_wallpaper(output):
 
 
 def set_slider_to_start(output, label):
-    node = find(output, label)
-    assert node.get("class", "").endswith("SeekBar"), (
-        f"{label} was not exposed as an Android SeekBar: {node.attrib}"
+    node = find(
+        output,
+        label,
+        predicate=lambda item: item.get("class", "").endswith("SeekBar"),
     )
     left, top, right, bottom = bounds(node)
     y = (top + bottom) // 2
@@ -355,10 +358,17 @@ def main():
     adb("reverse", f"tcp:{PORT}", f"tcp:{PORT}")
     try:
         shell(f"pm clear {PACKAGE}")
+        # The picker is normally opened from the appearance sheet, but the
+        # first run showed the test session terminating before that stage.
+        # Keep a visible marker so UI failures identify the last completed
+        # product action without relying on restricted workflow logs.
+        marker = output / "progress.txt"
+        marker.write_text("app-cleared\n", encoding="utf-8")
         shell(
             f"monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1",
             timeout=60,
         )
+        marker.write_text("app-launched\n", encoding="utf-8")
 
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
@@ -372,25 +382,39 @@ def main():
             raise DiagnosisFailure("The local connection screen did not become ready")
 
         enter(output, f"http://127.0.0.1:{PORT}")
+        marker.write_text("address-entered\n", encoding="utf-8")
         shell("input keyevent KEYCODE_BACK")
         tap(output, "Connect")
+        marker.write_text("connect-tapped\n", encoding="utf-8")
         find(output, "Wallpaper fixture 8765", timeout=45)
+        marker.write_text("fixture-connected\n", encoding="utf-8")
         screenshot(output, "00-connected-original")
 
         tap(output, "Client settings")
+        marker.write_text("menu-opened\n", encoding="utf-8")
         tap(output, "Appearance & reading")
+        marker.write_text("appearance-opened\n", encoding="utf-8")
         tap(output, "Enable appearance")
+        marker.write_text("appearance-enabled\n", encoding="utf-8")
         set_slider_to_start(output, "Scrim (%)")
+        marker.write_text("scrim-zero\n", encoding="utf-8")
         set_slider_to_start(output, "Panel opacity (%)")
+        marker.write_text("opacity-zero\n", encoding="utf-8")
         tap(output, "Apply")
+        marker.write_text("gradient-applied\n", encoding="utf-8")
         find(output, "Wallpaper fixture 8765", timeout=20)
         time.sleep(3)
         gradient = screenshot(output, "10-gradient")
+        marker.write_text("gradient-captured\n", encoding="utf-8")
 
         tap(output, "Client settings")
+        marker.write_text("menu-reopened\n", encoding="utf-8")
         tap(output, "Appearance & reading")
+        marker.write_text("appearance-reopened\n", encoding="utf-8")
         tap(output, "Choose image (up to 20 MB)", timeout=20)
+        marker.write_text("picker-opened\n", encoding="utf-8")
         select_wallpaper(output)
+        marker.write_text("picker-selected\n", encoding="utf-8")
 
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
@@ -403,13 +427,17 @@ def main():
             time.sleep(1)
         else:
             raise DiagnosisFailure("Image import did not finish")
+        marker.write_text("image-imported\n", encoding="utf-8")
         screenshot(output, "20-appearance-after-import")
         tap(output, "Apply")
+        marker.write_text("image-applied\n", encoding="utf-8")
         find(output, "Wallpaper fixture 8765", timeout=20)
         time.sleep(3)
         image = screenshot(output, "21-image")
+        marker.write_text("image-captured\n", encoding="utf-8")
 
         normalized_difference = image_compare(gradient, image, output)
+        marker.write_text(f"pixel-compare-passed:{normalized_difference:.6f}\n", encoding="utf-8")
         persisted = collect_persisted_config(output)
         result = {
             "status": "passed",
