@@ -1,6 +1,6 @@
 # 当前发布流程
 
-PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android APK 构建与 API29/36 全部验收 → 发布。
+PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android ARM64 APK 构建、单元测试、签名及包完整性校验 → 发布。
 
 - 正式入口为独立 `android.yml`，合并 main 后全自动发布 APK；不会触发 Windows/macOS。迁移后 Android versionCode 使用 `100000 + github.run_number`，大于此前已发布 APK，同一次运行重跑保持不变。旧三端工作流已移除。
 - PR 快检不接收签名 secrets、不运行 APK 或模拟器。文档变更在 main 仅快检。
@@ -8,7 +8,7 @@ PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android A
 - 失败时不发版。优先 Re-run failed jobs；同 run 全量重跑复用原版本 pin，artifact 按 attempt 隔离、保留14天。
 - 下载使用成功 job 的 artifact ID；每个包验证源码 SHA、版本、versionCode、run ID 和 SHA256，拒绝缺失或不匹配产物。
 - 已公开版本重跑只验证 tag 和公开校验文件，不覆盖资产；修复源码走新 PR 和新版本。
-- 保留每个 API 三次冷启动、每次60秒观察和所有真实交互检查；先交互后长观察。
+- 日常发布不构建 x86_64 测试 APK、不运行模拟器、完整交互或三次60秒冷启动观察。这些检查保留在可选诊断入口，不阻塞发布。
 - 手动诊断仍通过 Android emulator startup diagnosis 运行。没有自动 candidate 转发或独立 main push 模拟器。
 
 以下为历史签名配置参考；其中旧 candidate / 手动 release 的日常触发说明已被上述流程替代。

@@ -61,3 +61,11 @@ test('Android manifest pins resize and preserves unrelated activity attributes i
   assert.match(result, /android:exported="true"/);
   assert.equal(updateManifest(result), result);
 });
+
+test('theme and font changes are handled without Activity recreation, retaining existing flags', () => {
+  const source = '<manifest><application><activity android:name=".MainActivity" android:configChanges="keyboardHidden|locale" /></application></manifest>';
+  const result = updateManifest(source);
+  assert.equal(updateManifest(result), result);
+  const flags = result.match(/android:configChanges="([^"]+)"/)[1].split('|');
+  for (const flag of ['keyboardHidden', 'locale', 'uiMode', 'fontScale', 'orientation', 'screenSize']) assert.ok(flags.includes(flag));
+});

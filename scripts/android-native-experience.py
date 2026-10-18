@@ -158,7 +158,7 @@ def screenshot(label):
 
 
 def menu():
-    tap('Client menu')
+    tap('Client settings')
 
 
 def settings():
@@ -275,7 +275,7 @@ try:
     before = nodes('before-settings')
     nonce = next(n.get('text') for n in before if 'Page nonce:' in n.get('text', ''))
     assert 'draft-kept' in text_state(before), 'UNVERIFIED: fixture draft value unavailable'
-    assert bounds(find('Client menu'))[2] - bounds(find('Client menu'))[0] >= 48
+    assert bounds(find('Client settings'))[2] - bounds(find('Client settings'))[0] >= 48
     assert bounds(find('Fixture header 8765'))[1] >= 0
     dump = window_evidence('immersive')
     # Both API families expose the app's requested system UI policy in dumpsys.
@@ -310,17 +310,16 @@ try:
     restored = nodes('scroll-restored')
     assert nonce in text_state(restored) and 'draft-kept' in text_state(restored), 'Opening/cancelling settings changed page state'
 
-    # Native button drag persists across keyboard changes without reloading page.
-    button = find('Client menu'); x1, y1, x2, y2 = bounds(button)
-    x = (x1+x2)//2; y = (y1+y2)//2
-    shell(f'input swipe {x} {y} {x} {max(80, y-160)} 700')
-    drag_y = bounds(find('Client menu'))[1]
-    assert abs(drag_y-y1) > 50, 'Menu button did not drag'
+    # The permanent native toolbar reserves space instead of covering the page.
+    toolbar_before = bounds(find('Client toolbar'))
+    content_before = bounds(find('Fixture header 8765'))
+    assert toolbar_before[3] <= content_before[1] + 3, 'Toolbar covers remote content'
+    assert '127.0.0.1:8765' in text_state(nodes('service-label')), 'Toolbar omitted current server'
     tap('Draft'); time.sleep(2)
     screenshot('keyboard-visible')
     current = nodes('keyboard')
     draft = find('Draft')
-    button = find('Client menu')
+    button = find('Client settings')
     keyboard_nodes = [n for n in current if n.get('package', '').startswith(('com.google.android.inputmethod', 'com.android.inputmethod'))]
     if keyboard_nodes:
         keyboard_top = min(bounds(n)[1] for n in keyboard_nodes if bounds(n)[3] > bounds(n)[1])
@@ -348,7 +347,7 @@ try:
     assert bounds(button)[3] <= keyboard_top + 3, 'Menu covered by keyboard'
     assert bounds(find('Fixture bottom'))[3] <= keyboard_top + 3, 'Bottom composer covered by keyboard'
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
-    assert abs(bounds(find('Client menu'))[1] - drag_y) <= 4, 'Keyboard overwrote saved menu position'
+    assert bounds(find('Client toolbar')) == toolbar_before, 'Keyboard moved permanent toolbar'
 
     # Standard Back traverses only the current service, then backgrounds the app.
     tap('Next route'); find('Second route')
@@ -367,12 +366,12 @@ try:
     # Rotate without introducing remote CSS or destroying the client chrome.
     shell('settings put system accelerometer_rotation 0')
     shell('settings put system user_rotation 1'); time.sleep(3)
-    find('Client menu'); screenshot('landscape'); window_evidence('landscape')
+    find('Client settings'); screenshot('landscape'); window_evidence('landscape')
     shell('settings put system user_rotation 0'); time.sleep(3)
-    find('Client menu')
+    find('Client settings')
 
     settings(); connect_to('http://127.0.0.1:8766', confirm=True)
-    find('Fixture header 8766', timeout=40); find('Client menu')
+    find('Fixture header 8766', timeout=40); find('Client settings')
     settings(); connect_to('http://127.0.0.1:8767', confirm=True)
     find('Reopen previous server', timeout=45)
     screenshot('connection-failed')
@@ -382,7 +381,21 @@ try:
     shell(f'am force-stop {PACKAGE}')
     shell(f'monkey -p {PACKAGE} -c android.intent.category.LAUNCHER 1')
     find('Fixture header 8766', timeout=40)
-    assert abs(bounds(find('Client menu'))[1] - drag_y) <= 6, 'Menu preference did not persist across restart'
+    assert bounds(find('Client toolbar'))[3] <= bounds(find('Fixture header 8766'))[1] + 3, 'Restart lost toolbar reservation'
+
+    stable_nonce = next(n.get('text') for n in nodes('before-theme') if 'Page nonce:' in n.get('text', ''))
+    for mode in ('yes', 'no'):
+        shell(f'cmd uimode night {mode}')
+        time.sleep(2)
+        assert stable_nonce in text_state(nodes('theme-' + mode)), 'Theme change recreated the service'
+        assert 'draft-kept' in text_state(nodes()), 'Theme change lost draft'
+        settings(); screenshot('settings-' + mode); tap('CANCEL')
+        screenshot('toolbar-' + mode)
+    shell('settings put system font_scale 1.3'); time.sleep(2)
+    assert stable_nonce in text_state(nodes('large-font')), 'Font change recreated service'
+    assert bounds(find('Client toolbar'))[3] <= bounds(find('Fixture header 8766'))[1] + 3, 'Large font overlaps content'
+    settings(); screenshot('settings-large-font'); tap('CANCEL')
+    shell('settings put system font_scale 1.0'); time.sleep(2)
 
     # Reload must warn; cancelling keeps the exact document nonce.
     nonce = next(n.get('text') for n in nodes() if 'Page nonce:' in n.get('text', ''))
@@ -396,7 +409,7 @@ try:
     menu(); tap('Export Android diagnostics'); time.sleep(2)
     screenshot('diagnostics-picker')
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
-    find('Fixture header 8766'); find('Client menu')
+    find('Fixture header 8766'); find('Client settings')
     menu(); tap('Export Android diagnostics'); time.sleep(2)
     save_to_downloads()
     report = shell('cat /sdcard/Download/android-diagnostics.txt')
@@ -404,14 +417,14 @@ try:
     tap('Download fixture')
     find('fixture.txt'); screenshot('download-picker-cancel')
     shell('input keyevent KEYCODE_BACK'); time.sleep(2)
-    find('Client menu')
+    find('Client settings')
     tap('Download fixture')
     find('fixture.txt'); screenshot('download-picker-save')
     save_to_downloads()
     assert shell('cat /sdcard/Download/fixture.txt').strip() == 'fixture-download', 'Downloaded payload changed'
     screenshot('native-experience-pass')
     window_evidence('final')
-    (OUT / 'native-experience-result.txt').write_text('PASS: native menu, immersive request, fixture bridge denial, non-destructive settings, keyboard, drag, Back, rotation, switch, timeout recovery, reload and SAF diagnostic/download save and cancellation.\n', encoding='utf-8')
+    (OUT / 'native-experience-result.txt').write_text('PASS: native menu, immersive request, fixture bridge denial, non-destructive settings, keyboard, permanent toolbar, themes, large font, Back, rotation, switch, timeout recovery, reload and SAF diagnostic/download save and cancellation.\n', encoding='utf-8')
     print('ANDROID_NATIVE_EXPERIENCE_PASS')
 except Exception:
     screenshot('failure')
@@ -423,6 +436,8 @@ finally:
     for server in SERVERS:
         server.shutdown()
     shell('settings put system user_rotation 0', check=False)
+    shell('settings put system font_scale 1.0', check=False)
+    shell('cmd uimode night no', check=False)
     if 'cutout_overlay' in globals() and cutout_overlay:
         shell(f'cmd overlay disable {cutout_overlay}', check=False)
     for port in (8765, 8766, 8767):

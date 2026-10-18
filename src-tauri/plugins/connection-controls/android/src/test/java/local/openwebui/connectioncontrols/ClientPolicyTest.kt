@@ -4,13 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ClientPolicyTest {
-    @Test fun buttonPositionIsClampedAndKeyboardDoesNotMutatePreference() {
-        val remembered = .8f
-        assertEquals(761, ClientPolicy.buttonOffset(remembered, 1000, 0, 0, 48))
-        assertEquals(361, ClientPolicy.buttonOffset(remembered, 1000, 0, 500, 48))
-        assertEquals(761, ClientPolicy.buttonOffset(remembered, 1000, 0, 0, 48))
-        assertEquals(0, ClientPolicy.buttonOffset(-1f, 1000, 0, 0, 48))
-        assertEquals(0, ClientPolicy.buttonOffset(.5f, 40, 0, 0, 48))
+    @Test fun toolbarReservesSpaceAfterTheCutoutAndLeavesAUsableWebView() {
+        assertEquals(48, ClientPolicy.contentTop(0, 48, 1000))
+        assertEquals(96, ClientPolicy.contentTop(48, 48, 1000))
+        assertEquals(99, ClientPolicy.contentTop(80, 48, 100))
+        assertEquals(0, ClientPolicy.contentTop(0, 48, 0))
+    }
+    @Test fun toolbarServiceLabelOmitsDefaultPortsCredentialsAndPaths() {
+        assertEquals("chat.example", ClientPolicy.serviceLabel("https://chat.example:443/path"))
+        assertEquals("chat.example:8443", ClientPolicy.serviceLabel("https://chat.example:8443"))
+        assertEquals("[::1]:8765", ClientPolicy.serviceLabel("http://[::1]:8765"))
+        assertEquals("Open WebUI", ClientPolicy.serviceLabel("https://user:pass@chat.example"))
+        assertEquals("Open WebUI", ClientPolicy.serviceLabel(null))
     }
     @Test fun alreadyResizedRootDoesNotSubtractKeyboardTwice() {
         assertEquals(0, ClientPolicy.bottomOverlap(600, 1000, 400))

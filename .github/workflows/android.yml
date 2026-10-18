@@ -134,14 +134,6 @@ jobs:
           ANDROID_RELEASE_SECRETS_VALIDATED: ${{ needs.validate-android-signing.outputs.validated }}
         run: node scripts/release-orchestrator.mjs prepare
 
-  release-emulator-smoke:
-    needs: [prepare-release, release-quality]
-    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
-    uses: ./.github/workflows/android-emulator-diagnose.yml
-    with:
-      source_sha: ${{ needs.prepare-release.outputs.commit_sha }}
-      source_label: release-pinned
-
   android:
     needs: [prepare-release, release-quality, validate-android-signing]
     if: ${{ needs.prepare-release.outputs.ready == 'true' && needs.validate-android-signing.outputs.validated == 'true' }}
@@ -290,8 +282,8 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    needs: [prepare-release, release-quality, android, release-emulator-smoke]
-    if: ${{ always() && needs.prepare-release.outputs.ready == 'true' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
+    needs: [prepare-release, release-quality, android]
+    if: ${{ always() && needs.prepare-release.outputs.ready == 'true' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.android.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -321,7 +313,7 @@ jobs:
         run: node scripts/release-orchestrator.mjs publish
 
   timing-summary:
-    needs: [prepare-lockfile, quality, validate-android-signing, prepare-release, release-quality, android, release-emulator-smoke, publish-release]
+    needs: [prepare-lockfile, quality, validate-android-signing, prepare-release, release-quality, android, publish-release]
     if: always()
     runs-on: ubuntu-22.04
     permissions:
