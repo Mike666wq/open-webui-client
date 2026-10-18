@@ -45,6 +45,11 @@ def screenshot(output, label):
     result = command(["adb", "exec-out", "screencap", "-p"], timeout=45, text=False)
     path = output / f"{label}.png"
     path.write_bytes(result.stdout)
+    signature = command(
+        ["identify", "-format", "%[mean] %[standard-deviation]", str(path)],
+        timeout=30,
+    ).stdout.strip()
+    (output / f"{label}.pixels.txt").write_text(signature + "\n", encoding="utf-8")
     return path
 
 
@@ -197,6 +202,30 @@ def find(output, label, *, timeout=30, exact=False, predicate=None):
                 return node
         time.sleep(1)
     raise DiagnosisFailure(f"Missing UI control: {label}")
+
+
+def wait_for_web_page(output, *, timeout=45):
+    """Wait for native connection state and WebView paint without parsing its DOM."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        nodes = hierarchy(output, "web-page-ready")
+        has_client_toolbar = any(
+            node.get("content-desc", "") in ("Client toolbar", "客户端顶部栏")
+            for node in nodes
+        )
+        has_connected_status = any(
+            node.get("text", "") == "Connected"
+            or node.get("text", "") == "已连接"
+            for node in nodes
+        )
+        has_web_view = any(
+            node.get("class", "").endswith("WebView") for node in nodes
+        )
+        if has_client_toolbar and has_connected_status and has_web_view:
+            screenshot(output, "web-page-ready")
+            return
+        time.sleep(1)
+    raise DiagnosisFailure("Connected WebView did not render within the expected time")
 
 
 def tap_node(node):
@@ -514,7 +543,7 @@ def main():
         shell("input keyevent KEYCODE_BACK")
         tap_exact(output, "Connect")
         marker.write_text("connect-tapped\n", encoding="utf-8")
-        find(output, "Wallpaper fixture 8765", timeout=45)
+        wait_for_web_page(output, timeout=45)
         marker.write_text("fixture-connected\n", encoding="utf-8")
         screenshot(output, "00-connected-original")
 
@@ -530,7 +559,7 @@ def main():
         marker.write_text("opacity-zero\n", encoding="utf-8")
         tap_exact(output, "Apply")
         marker.write_text("gradient-applied\n", encoding="utf-8")
-        find(output, "Wallpaper fixture 8765", timeout=20)
+        find(output, "Client settings", timeout=20, exact=True)
         time.sleep(3)
         gradient = screenshot(output, "10-gradient")
         marker.write_text("gradient-captured\n", encoding="utf-8")
@@ -563,7 +592,7 @@ def main():
         screenshot(output, "20-appearance-after-import")
         tap_exact(output, "Apply")
         marker.write_text("image-applied\n", encoding="utf-8")
-        find(output, "Wallpaper fixture 8765", timeout=20)
+        find(output, "Client settings", timeout=20, exact=True)
         time.sleep(3)
         image = screenshot(output, "21-image")
         marker.write_text("image-captured\n", encoding="utf-8")
