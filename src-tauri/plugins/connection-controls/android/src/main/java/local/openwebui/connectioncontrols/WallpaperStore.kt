@@ -44,6 +44,7 @@ internal class WallpaperStore(private val context: Context) {
             }
             output.toByteArray()
         } ?: throw IllegalArgumentException("Image unavailable")
+        require(ImagePolicy.staticImage(bytes)) { "Choose a static image" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         require(bounds.outMimeType in listOf("image/jpeg", "image/png", "image/webp")) { "Unsupported image" }
@@ -108,6 +109,26 @@ internal class WallpaperStore(private val context: Context) {
 }
 
 internal object ImagePolicy {
+    fun staticImage(bytes: ByteArray): Boolean {
+        if(bytes.size < 12) return false
+        fun tag(offset: Int, length: Int=4) = String(bytes,offset,length,Charsets.ISO_8859_1)
+        if((bytes[0].toInt() and 255)==255 && (bytes[1].toInt() and 255)==216 && (bytes[2].toInt() and 255)==255) return true
+        val png=bytes.take(8).toByteArray().contentEquals(byteArrayOf(-119,80,78,71,13,10,26,10))
+        val webp=tag(0)=="RIFF" && tag(8)=="WEBP"
+        if(!png && !webp) return false
+        var offset=if(png) 8 else 12
+        while(offset+8 <= bytes.size) {
+            val chunk=tag(offset+if(png) 4 else 0)
+            if(chunk in listOf("acTL","ANIM","ANMF")) return false
+            var length=0L
+            for(i in 0..3) length=length or ((bytes[offset+(if(png) i else 4+i)].toLong() and 255) shl (if(png) (3-i)*8 else i*8))
+            val next=offset.toLong()+8+length+(if(png) 4 else length%2)
+            if(next>bytes.size || next<=offset) return false
+            offset=next.toInt()
+        }
+        return offset==bytes.size
+    }
+
     fun sample(width: Int, height: Int): Int {
         require(width > 0 && height > 0 && width.toLong()*height <= 100_000_000 && max(width,height) <= 50_000)
         var sample=1

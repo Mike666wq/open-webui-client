@@ -51,7 +51,8 @@ internal class PersonalizationController(
     private var directorySearch: EditText?=null
     private var editorStatus: TextView?=null
     private var pendingImport=false
-    private var pickerRevision=-1L
+    private var editorSession=0L
+    private var pickerSession=-1L
     private val temporary=mutableSetOf<String>()
     private var renderKey=""
     private var renderRevision=0L
@@ -71,13 +72,13 @@ internal class PersonalizationController(
         "owc-private-wallpaper", ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val uri=result.data?.data
-        if(result.resultCode==Activity.RESULT_OK && uri!=null && draft!=null && pickerRevision==revision) {
-            val pin=revision
+        if(result.resultCode==Activity.RESULT_OK && uri!=null && draft!=null && pickerSession==editorSession) {
+            val pin=editorSession
             pendingImport=true; editorStatus?.text=tr("Importing…", "正在导入…")
             work {
                 val imported=runCatching { store.import(uri) }
                 handler.post {
-                    if(disposed || pin!=revision || draft==null) imported.getOrNull()?.let(store::delete)
+                    if(disposed || pin!=editorSession || draft==null) imported.getOrNull()?.let(store::delete)
                     else {
                         pendingImport=false
                         imported.onSuccess { name -> temporary.add(name); draft=current.copy(image=name,background="image"); preview() }
@@ -257,7 +258,7 @@ internal class PersonalizationController(
             text=tr("Choose image (up to 20 MB)","选择图片（不超过 20MB）"); isAllCaps=false; minHeight=dp(48)
             setOnClickListener {
                 if(pendingImport) return@setOnClickListener
-                pickerRevision=revision
+                pickerSession=editorSession
                 try { launcher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE); type="image/*"
                     putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("image/jpeg","image/png","image/webp"))
@@ -301,7 +302,7 @@ internal class PersonalizationController(
         }
         dialog.setOnDismissListener {
             if(editor===dialog) {
-                editor=null; editorStatus=null; draft=null; revision++; dirty=true; inFlight=false; pendingImport=false
+                editor=null; editorStatus=null; draft=null; editorSession++; revision++; dirty=true; inFlight=false; pendingImport=false
                 temporary.forEach(store::delete); temporary.clear(); themeChanged()
                 navigationChanged(origin!=null && saved.navigation); updateWallpaper(); refresh()
             }

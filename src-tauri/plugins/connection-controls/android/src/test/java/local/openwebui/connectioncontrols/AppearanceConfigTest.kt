@@ -32,6 +32,14 @@ class AppearanceConfigTest {
         val value=AppearanceConfig.preset("reading",AppearanceConfig(navigation=true))
         assertEquals(100,value.opacity); assertEquals("solid",value.background); assertTrue(value.navigation)
     }
+    @Test fun staticHeadersRejectAnimatedAndDisguisedInputs() {
+        assertFalse(ImagePolicy.staticImage("GIF89a-not-a-jpeg".toByteArray()))
+        val animated="RIFFxxxxWEBPANIM".toByteArray()+byteArrayOf(0,0,0,0)
+        assertFalse(ImagePolicy.staticImage(animated))
+        val still="RIFFxxxxWEBPVP8 ".toByteArray()+byteArrayOf(0,0,0,0)
+        assertTrue(ImagePolicy.staticImage(still))
+        assertFalse(ImagePolicy.staticImage(still.copyOf(still.size-1)))
+    }
     @Test fun decodeLimitsAndSamplingBoundDecodedMemory() {
         assertEquals(1,ImagePolicy.sample(2560,1440)); assertEquals(4,ImagePolicy.sample(8000,6000))
         for(pair in listOf(0 to 100, -1 to 100, 50001 to 1, 20000 to 20000)) {
