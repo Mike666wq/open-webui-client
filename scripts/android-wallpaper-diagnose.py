@@ -264,6 +264,18 @@ def set_slider_to_start(output, label):
     time.sleep(0.4)
 
 
+def enable_appearance(output):
+    toggle = find(
+        output,
+        "Enable appearance",
+        predicate=lambda item: item.get("class", "").endswith(
+            ("Switch", "SwitchCompat")
+        )
+    )
+    if toggle.get("checked") != "true":
+        tap_node(toggle)
+
+
 def image_compare(before, after, output):
     dimensions = command(
         ["identify", "-format", "%w %h", str(before)], timeout=30
@@ -394,7 +406,7 @@ def main():
         marker.write_text("menu-opened\n", encoding="utf-8")
         tap(output, "Appearance & reading")
         marker.write_text("appearance-opened\n", encoding="utf-8")
-        tap(output, "Enable appearance")
+        enable_appearance(output)
         marker.write_text("appearance-enabled\n", encoding="utf-8")
         set_slider_to_start(output, "Scrim (%)")
         marker.write_text("scrim-zero\n", encoding="utf-8")
