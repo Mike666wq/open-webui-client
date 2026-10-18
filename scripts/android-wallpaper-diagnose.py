@@ -470,20 +470,49 @@ def main():
         print("ANDROID_WALLPAPER_DIAGNOSE_PASS")
     except Exception:
         screenshot(output, "failure-screen")
+        current = "/sdcard/wallpaper-failure.xml"
+        local = output / "failure-ui.xml"
+        shell(f"uiautomator dump {current}", check=False)
+        adb("pull", current, str(local), check=False)
         (output / "failure-windows.txt").write_text(
             shell("dumpsys window windows", check=False) + "\n", encoding="utf-8"
         )
         (output / "failure-logcat.txt").write_text(
             adb("logcat", "-d", "-t", "3000", check=False) + "\n", encoding="utf-8"
         )
-        try:
-            (output / "failure-ui.xml").write_text(
-                shell("cat /sdcard/wallpaper-window.xml", check=False) + "\n",
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
-        raise
+        if local.is_file():
+            try:
+                root = ET.fromstring(local.read_text(encoding="utf-8"))
+                labels = [
+                    "text=" + node.get("text", "")
+                    + " desc=" + node.get("content-desc", "")
+                    + " class=" + node.get("class", "").split(".")[-1]
+                    + " checked=" + node.get("checked", "")
+                    + " enabled=" + node.get("enabled", "")
+                    for node in root.iter("node")
+                    if node.get("text")
+                    or node.get("content-desc")
+                    or node.get("class", "").endswith(("Switch", "SwitchCompat"))
+                ]
+                marker = output / "progress.txt"
+                progress = marker.read_text(encoding="utf-8").strip() if marker.is_file() else "unknown"
+                progress = re.sub(r"[^A-Za-z0-9_.:-]", "-", progress)[:200]
+                failure = DiagnosisFailure(
+                    progress + " | controls: " + " || ".join(labels[-30:])
+                )
+                raise failure
+            except ET.ParseError:
+                pass
+        progress_path = output / "progress.txt"
+        progress = (
+            progress_path.read_text(encoding="utf-8").strip()
+            if progress_path.is_file()
+            else "unknown"
+        )
+        progress = re.sub(r"[^A-Za-z0-9_.:-]", "-", progress)[:200]
+        raise DiagnosisFailure(
+            progress + " | failure hierarchy unavailable"
+        ) from None
     finally:
         server.shutdown()
         adb("reverse", "--remove", f"tcp:{PORT}", check=False)
