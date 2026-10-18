@@ -2,6 +2,7 @@
 """Exercise the Android wallpaper preview on a GitHub-hosted emulator."""
 
 import argparse
+import hashlib
 import json
 import re
 import struct
@@ -16,6 +17,26 @@ from pathlib import Path
 PACKAGE = "local.openwebui.client"
 IMAGE_NAME = "owc-wallpaper-diagnose.png"
 PORT = 8765
+
+# This is the image the user reported: appearance disabled, a saved local image,
+# and the image control still showing the gradient until Apply is enabled.
+REPORTED_CONFIG = {
+    "schema": 1,
+    "enabled": False,
+    "navigation": False,
+    "preset": "blue",
+    "mode": "system",
+    "accent": "#2563EB",
+    "background": "gradient",
+    "image": "",
+    "position": 50,
+    "zoom": 100,
+    "dim": 30,
+    "blur": 0,
+    "opacity": 90,
+    "fontSize": 16,
+    "lineHeight": 165,
+}
 
 
 class DiagnosisFailure(RuntimeError):
@@ -417,16 +438,50 @@ def tap_after_scroll(output, label, *, timeout=12):
         raise DiagnosisFailure(f"Could not scroll the panel to {label}")
 
 
-def enable_appearance(output):
+def disable_appearance(output):
     toggle = find(
         output,
         "Enable appearance",
         predicate=lambda item: item.get("class", "").endswith(
             ("Switch", "SwitchCompat")
-        )
+        ),
     )
-    if toggle.get("checked") != "true":
+    if toggle.get("checked") == "true":
         tap_node(toggle)
+
+
+def switch_is_checked(output, label):
+    toggle = find(
+        output,
+        label,
+        timeout=20,
+        predicate=lambda item: item.get("class", "").endswith(
+            ("Switch", "SwitchCompat")
+        ),
+    )
+    return toggle.get("checked") == "true"
+
+
+def install_reported_config(output):
+    """Seed only the per-origin appearance config, never login or chat state."""
+    root = shell("id -u", check=False).strip()
+    if root != "0":
+        adb("root", check=False, timeout=30)
+        time.sleep(2)
+        adb("wait-for-device", check=False, timeout=30)
+    origin = f"http://127.0.0.1:{PORT}"
+    digest = hashlib.sha256(origin.encode()).hexdigest()
+    directory = f"/data/user/0/{PACKAGE}/no_backup/appearance"
+    target = f"{directory}/{digest}.json"
+    local = output / "reported-appearance-config.json"
+    local.write_text(json.dumps(REPORTED_CONFIG, separators=(",", ":")) + "\n")
+    shell(f"mkdir -p {directory}")
+    adb("push", str(local), target)
+    shell(f"chown $(stat -c '%u:%g' {directory}) {target}")
+    shell(f"chmod 600 {target}")
+    stored = json.loads(shell(f"cat {target}"))
+    if stored != REPORTED_CONFIG:
+        raise DiagnosisFailure(f"Could not seed the reported appearance state: {stored}")
 
 
 def image_compare(before, after, output):
@@ -493,7 +548,7 @@ def collect_persisted_config(output):
         raise DiagnosisFailure(f"Persisted appearance config is not valid JSON: {error}") from error
     if parsed.get("background") != "image" or not re.fullmatch(
         r"wallpaper-[a-f0-9-]+\.jpg", parsed.get("image", "")
-    ):
+    ) or parsed.get("enabled") is not True:
         raise DiagnosisFailure(f"Unexpected persisted appearance config: {parsed}")
     return parsed
 
@@ -523,6 +578,7 @@ def main():
     adb("reverse", f"tcp:{PORT}", f"tcp:{PORT}")
     try:
         shell(f"pm clear {PACKAGE}")
+        install_reported_config(output)
         # The picker is normally opened from the appearance sheet, but the
         # first run showed the test session terminating before that stage.
         # Keep a visible marker so UI failures identify the last completed
@@ -559,8 +615,9 @@ def main():
         marker.write_text("menu-opened\n", encoding="utf-8")
         tap_picker(output)
         marker.write_text("appearance-opened\n", encoding="utf-8")
-        enable_appearance(output)
-        marker.write_text("appearance-enabled\n", encoding="utf-8")
+        if switch_is_checked(output, "Enable appearance"):
+            raise DiagnosisFailure("The reported appearance state was not seeded as disabled")
+        marker.write_text("reported-disabled-appearance-open\n", encoding="utf-8")
         set_slider_to_start(output, "Scrim (%)")
         marker.write_text("scrim-zero\n", encoding="utf-8")
         set_slider_to_start(output, "Panel opacity (%)")
@@ -605,7 +662,22 @@ def main():
                 ),
                 None,
             )
-            if "Importing" not in text and local_image and apply is not None:
+            preview = next(
+                (
+                    node
+                    for node in nodes
+                    if node.get("content-desc") == "Wallpaper preview"
+                ),
+                None,
+            )
+            appearance_enabled = switch_is_checked(output, "Enable appearance")
+            if (
+                "Importing" not in text
+                and local_image
+                and apply is not None
+                and preview is not None
+                and appearance_enabled
+            ):
                 break
             time.sleep(1)
         else:

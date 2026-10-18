@@ -9,7 +9,7 @@ test('wallpaper diagnosis is isolated from both quick checks and APK releases', 
   );
   assert.match(workflow, /name: Android wallpaper diagnosis/);
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /branches:\s*\n\s*- codex\/android-wallpaper-diagnose/);
+  assert.match(workflow, /branches:\s*\n\s*- codex\/android-wallpaper-diagnose\s*\n\s*- codex\/android-wallpaper-preview-fix/);
   assert.match(workflow, /system-images;android-36;google_apis;x86_64/);
   assert.doesNotMatch(workflow, /branches:\s*\n\s*- main/);
   assert.doesNotMatch(workflow, /windows-|macos-|release-orchestrator\.mjs publish/);
@@ -30,7 +30,11 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /preview the file/);
   assert.match(script, /not is_preview_action/);
   assert.match(script, /Appearance image import failed/);
-  assert.match(script, /local_image and apply is not None/);
+  assert.match(script, /and local_image\s+and apply is not None/s);
+  assert.match(script, /content-desc.*Wallpaper preview|Wallpaper preview/s);
+  assert.match(script, /appearance_enabled/);
+  assert.match(script, /install_reported_config/);
+  assert.match(script, /haslib\.sha256|hashlib\.sha256/);
   assert.match(script, /"appearance & reading" in text/);
   assert.match(script, /"choose image" in text/);
   assert.doesNotMatch(script, /"choose image" in labels/);
