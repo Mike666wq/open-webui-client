@@ -80,7 +80,7 @@
 
 ## Android native experience (post-v0.2.4)
 
-GitHub API 29/36 gates use synthetic runner-local services, not a user's Open WebUI data.
+Optional GitHub API 29/36 diagnostics use synthetic runner-local services, not a user's Open WebUI data. They are not part of the automatic APK release gate.
 They must prove that native settings cancellation keeps the document/draft, the native-only
 plugin denies page calls, switches use the existing handshake and success persistence,
 failed switches retain the previous successful service, and Back never revisits another
@@ -95,7 +95,7 @@ light/dark themes, large fonts, toolbar non-overlap and settings-panel layout. N
 actions are serialized; stale generations/revisions are rejected.
 Chinese Android locales use Chinese client labels; other locales fall back to English.
 
-A green emulator gate does not claim HyperOS physical-device UX acceptance. Release can
+A green optional emulator diagnosis does not claim HyperOS physical-device UX acceptance. Release can
 proceed after the GitHub gates, as requested, with that limitation stated in release notes.
 
 

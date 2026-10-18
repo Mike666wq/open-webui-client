@@ -262,7 +262,7 @@ export async function publishRelease(adapter, rawPin, checks, artifacts) {
     tag: pin.tag,
     commitSha: pin.commitSha,
     title: `Open WebUI Client ${pin.version}`,
-    body: `Release ${pin.version}\nSource commit: ${pin.commitSha}\nWorkflow run: ${pin.runId}\nAndroid versionCode: ${pin.versionCode}\n\nAndroid: immersive status bar, native connection menu, keyboard/inset and Back-navigation improvements are covered by GitHub automated checks. HyperOS physical-device UX acceptance has not been completed.`,
+    body: `Release ${pin.version}\nSource commit: ${pin.commitSha}\nWorkflow run: ${pin.runId}\nAndroid versionCode: ${pin.versionCode}\n\nAndroid: native toolbar and connection panels. Automated release checks cover source tests, frontend build, Android compilation/unit tests, signing and package integrity. Emulator interaction/cold-start checks are optional diagnostics and were not run as part of this release. HyperOS physical-device UX acceptance has not been completed.`,
   });
   if (!release?.draft || release.prerelease || !release.id) {
     throw new Error('GitHub did not return a draft release');
