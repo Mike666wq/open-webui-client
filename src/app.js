@@ -16,7 +16,10 @@ const diagnosticsStatus = document.querySelector('#diagnostics-status');
 let state = 'settings';
 const isAndroid = /Android/i.test(navigator.userAgent);
 const strings = androidStrings(isAndroid, navigator.language);
-if (isAndroid) document.body.classList.add('android-client');
+if (isAndroid) {
+  document.documentElement.classList.add('android-client-root');
+  document.body.classList.add('android-client');
+}
 if (strings) {
   document.documentElement.lang = 'zh-CN';
   document.querySelector('label[for="service-address"]').textContent = strings.label;

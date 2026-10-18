@@ -44,7 +44,14 @@ export function updateManifest(source) {
     : tag;
   const adjusted = /android:windowSoftInputMode\s*=/.test(tag) ? updated
     : tag.replace(/\s*\/?>$/, (ending) => ` android:windowSoftInputMode="adjustResize"${ending}`);
-  return result.replace(tag, adjusted);
+  const config = adjusted.match(/android:configChanges\s*=\s*(["'])([^"']*)\1/);
+  const flags = new Set((config?.[2] || '').split('|').filter(Boolean));
+  // Updating native colors and font metrics must preserve the existing WebView.
+  for (const flag of ['uiMode', 'fontScale', 'orientation', 'screenSize', 'screenLayout', 'smallestScreenSize']) flags.add(flag);
+  const configAttribute = `android:configChanges="${[...flags].join('|')}"`;
+  const themed = config ? adjusted.replace(config[0], configAttribute)
+    : adjusted.replace(/\s*\/?>$/, (ending) => ` ${configAttribute}${ending}`);
+  return result.replace(tag, themed);
 }
 
 function parseReleaseVersionCode(value) {
