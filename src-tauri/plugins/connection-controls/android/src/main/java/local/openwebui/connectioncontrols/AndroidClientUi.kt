@@ -286,7 +286,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
         recolor(window.decorView)
         address?.apply {
-            setTextColor(foreground); setHintTextColor(secondary)
+            setTextColor(this@AndroidClientUi.foreground); setHintTextColor(secondary)
             backgroundTintList = null
             background = GradientDrawable().apply { setColor(fieldSurface); cornerRadius = dp(14).toFloat(); setStroke(dp(1), accent) }
         }
