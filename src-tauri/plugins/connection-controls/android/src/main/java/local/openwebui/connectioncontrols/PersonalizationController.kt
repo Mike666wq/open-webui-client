@@ -81,7 +81,7 @@ internal class PersonalizationController(
                     if(disposed || pin!=editorSession || draft==null) imported.getOrNull()?.let(store::delete)
                     else {
                         pendingImport=false
-                        imported.onSuccess { name -> temporary.add(name); draft=current.copy(image=name,background="image"); preview() }
+                        imported.onSuccess { name -> temporary.add(name); draft=current.copy(image=name,background="image"); preview(); rebuildEditor() }
                             .onFailure { toast("Could not import image. Use JPEG, PNG or WebP up to 20 MB.","导入失败，请选择不超过 20MB 的 JPEG、PNG 或 WebP 图片。") }
                         updateStatus()
                     }
