@@ -75,4 +75,6 @@ jobs:
           sha256sum --check --ignore-missing "actionlint_${version}_checksums.txt"
           tar -xzf "actionlint_${version}_linux_amd64.tar.gz" actionlint
           cd "$GITHUB_WORKSPACE"
-          "$temp/actionlint" -shellcheck= -pyflakes=
+          # GitHub supports concurrency.queue; this pinned actionlint predates it.
+          # Suppress only that exact unknown-key diagnostic, retaining all others.
+          "$temp/actionlint" -shellcheck= -pyflakes= -ignore '^unexpected key "queue" for "concurrency" section\.'
