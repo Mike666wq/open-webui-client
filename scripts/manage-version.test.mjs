@@ -130,3 +130,10 @@ test('invalid, stale, or inconsistent bump inputs do not write any version file'
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('Android workflow migration keeps codes above previously released APKs', () => {
+  assert.equal(versionCodeFromRunNumber(1, 100000), 100001);
+  assert.equal(versionCodeFromRunNumber(2, 100000), 100002);
+  assert.throws(() => versionCodeFromRunNumber(1, -1));
+  assert.throws(() => versionCodeFromRunNumber(2_100_000_000, 100000));
+});

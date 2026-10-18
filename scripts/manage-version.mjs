@@ -48,11 +48,12 @@ function bumpedVersion(current, part) {
   throw new Error('Bump target must be major, minor, patch, or a stable X.Y.Z version');
 }
 
-export function versionCodeFromRunNumber(runNumber) {
+export function versionCodeFromRunNumber(runNumber, base = ANDROID_VERSION_CODE_BASE) {
   if (!Number.isSafeInteger(runNumber) || runNumber < 1) {
     throw new Error('GitHub run number must be a positive safe integer');
   }
-  const versionCode = ANDROID_VERSION_CODE_BASE + runNumber;
+  if (!Number.isSafeInteger(base) || base < 1000) throw new Error('Android version code base must be an integer >= 1000');
+  const versionCode = base + runNumber;
   if (versionCode > MAX_ANDROID_VERSION_CODE) {
     throw new Error(`Android version code must not exceed ${MAX_ANDROID_VERSION_CODE}`);
   }

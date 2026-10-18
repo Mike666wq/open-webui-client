@@ -1,23 +1,15 @@
-name: Build desktop and Android packages
+name: Android APK release
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Resume or start a complete release on main
-        required: true
-        type: choice
-        default: release
-        options: [release]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-main
+  group: android-release-main
   cancel-in-progress: false
   queue: max
 
@@ -25,6 +17,8 @@ env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.94.0
   NODE_VERSION: 22.22.0
+  RELEASE_TARGETS: android
+  ANDROID_VERSION_CODE_BASE: 100000
 
 jobs:
   prepare-lockfile:
@@ -59,7 +53,7 @@ jobs:
           python3 - <<'PYCODE'
           import json, os, subprocess
           before = os.environ.get('RELEASE_BEFORE_SHA', '')
-          files = ['.github/workflows/build.yml']
+          files = ['.github/workflows/android.yml']
           if before and set(before) != {'0'}:
               data = subprocess.check_output(['git', 'diff', '--name-only', '-z', before, os.environ['GITHUB_SHA']])
               files = [p.decode() for p in data.split(b'\0') if p]
@@ -147,238 +141,6 @@ jobs:
     with:
       source_sha: ${{ needs.prepare-release.outputs.commit_sha }}
       source_label: release-pinned
-
-  windows:
-    needs: [prepare-release, release-quality]
-    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
-    runs-on: windows-2025
-    env:
-      RELEASE_COMMIT_SHA: ${{ needs.prepare-release.outputs.commit_sha }}
-      RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
-      RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
-    outputs:
-      artifact_id: ${{ steps.upload-release.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-release.outputs.commit_sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-          cache-on-failure: true
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Fetch locked Rust dependencies
-        run: |
-          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
-          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
-      - name: Build NSIS installer
-        run: npm run tauri -- build --bundles nsis
-      - name: Stage NSIS installer before icon validation
-        id: windows-installer-staged
-        shell: pwsh
-        run: |
-          $version = node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version"
-          $files = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis/*.exe' -File
-          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          $artifact = "Open-WebUI-Client-$version-windows-x64-setup.exe"
-          Copy-Item $files[0].FullName "artifacts/$artifact"
-          "artifact=$artifact" >> $env:GITHUB_OUTPUT
-      - name: Verify Windows executable icons
-        id: verify-windows-icons
-        shell: pwsh
-        run: |
-          git diff --exit-code -- src-tauri/Cargo.lock
-          $files = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis/*.exe' -File
-          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
-          $icoPath = 'src-tauri/icons/icon.ico'
-          $icoBytes = [IO.File]::ReadAllBytes((Resolve-Path $icoPath))
-          $entryCount = [BitConverter]::ToUInt16($icoBytes, 4)
-          $iconSizes = @()
-          for ($i = 0; $i -lt $entryCount; $i++) {
-            $offset = 6 + ($i * 16)
-            $width = if ($icoBytes[$offset] -eq 0) { 256 } else { [int]$icoBytes[$offset] }
-            $height = if ($icoBytes[$offset + 1] -eq 0) { 256 } else { [int]$icoBytes[$offset + 1] }
-            if ($width -eq $height) { $iconSizes += $width }
-          }
-          foreach ($size in @(16, 32, 48, 256)) {
-            if ($iconSizes -notcontains $size) { throw "Official ICO is missing a ${size}px frame" }
-          }
-          Add-Type -AssemblyName System.Drawing
-          function Assert-EmbeddedIconMatches([string]$exePath, [string]$expectedIco) {
-            $actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $exePath))
-            if ($null -eq $actualIcon) { throw "No embedded Windows icon resource in $exePath" }
-            $resolvedExpectedIcon = Resolve-Path -LiteralPath $expectedIco
-            $expectedIcon = [System.Drawing.Icon]::new($resolvedExpectedIcon.Path, $actualIcon.Size)
-            $actualBitmap = $actualIcon.ToBitmap()
-            $expectedBitmap = $expectedIcon.ToBitmap()
-            try {
-              if ($actualBitmap.Size -ne $expectedBitmap.Size) { throw "Embedded icon size differs in $exePath" }
-              for ($y = 0; $y -lt $actualBitmap.Height; $y++) {
-                for ($x = 0; $x -lt $actualBitmap.Width; $x++) {
-                  if ($actualBitmap.GetPixel($x, $y).ToArgb() -ne $expectedBitmap.GetPixel($x, $y).ToArgb()) {
-                    throw "Embedded icon pixels do not match the official ICO in $exePath"
-                  }
-                }
-              }
-            } finally {
-              $actualBitmap.Dispose(); $expectedBitmap.Dispose(); $actualIcon.Dispose(); $expectedIcon.Dispose()
-            }
-          }
-          Assert-EmbeddedIconMatches 'src-tauri/target/release/open-webui-client.exe' $icoPath
-          Assert-EmbeddedIconMatches $files[0].FullName $icoPath
-          Write-Host 'Desktop application and NSIS installer icons match the official ICO.'
-      - name: Report Windows package validation
-        if: always() && steps.windows-installer-staged.outcome == 'success'
-        shell: pwsh
-        run: |
-          if ('${{ steps.verify-windows-icons.outcome }}' -eq 'success') {
-            Add-Content $env:GITHUB_STEP_SUMMARY 'The NSIS installer passed icon validation; it remains internal until every release gate succeeds.'
-          } else {
-            Add-Content $env:GITHUB_STEP_SUMMARY 'The installer is retained as an internal UNVERIFIED artifact after post-build validation failed. It cannot enter a Release.'
-          }
-      - name: Record windows package provenance
-        if: steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome == 'success'
-        run: node scripts/artifact-integrity.mjs stage windows artifacts
-      - uses: actions/upload-artifact@v4
-        id: upload-release
-        if: steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome == 'success'
-        with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64-run${{ github.run_id }}-attempt${{ github.run_attempt }}
-          retention-days: 14
-          path: |
-            artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
-            artifacts/windows.manifest.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        if: always() && steps.windows-installer-staged.outcome == 'success' && steps.verify-windows-icons.outcome != 'success'
-        with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-windows-x64-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
-          path: artifacts/Open-WebUI-Client-*-windows-x64-setup.exe
-          retention-days: 14
-          if-no-files-found: error
-
-  macos:
-    needs: [prepare-release, release-quality]
-    if: ${{ needs.prepare-release.outputs.ready == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
-    env:
-      RELEASE_COMMIT_SHA: ${{ needs.prepare-release.outputs.commit_sha }}
-      RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
-      RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
-    outputs:
-      artifact_id: ${{ steps.upload-release.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-release.outputs.commit_sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-          cache-on-failure: true
-      - run: npm ci
-      - name: Fetch locked Rust dependencies
-        run: |
-          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
-          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
-      - name: Build ad-hoc DMG
-        run: npm run tauri -- build --target ${{ matrix.target }} --bundles dmg
-      - name: Stage DMG before post-build checks
-        id: macos-dmg-staged
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
-          shopt -s nullglob
-          files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
-          test "${#files[@]}" -eq 1 || { echo "Expected one DMG, found ${#files[@]}" >&2; exit 1; }
-          mkdir -p artifacts
-          cp "${files[0]}" "artifacts/Open-WebUI-Client-${version}-macos-${{ matrix.arch }}.dmg"
-      - name: Run Rust library unit tests
-        id: rust-library-tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --release --locked --target aarch64-apple-darwin
-      - name: Verify packaged DMG icon
-        id: verify-macos-icon
-        shell: bash
-        run: |
-          git diff --exit-code -- src-tauri/Cargo.lock
-          shopt -s nullglob
-          files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
-          test "${#files[@]}" -eq 1 || { echo "Expected one DMG, found ${#files[@]}" >&2; exit 1; }
-          mountpoint="$RUNNER_TEMP/app-icon-check"
-          mkdir -p "$mountpoint"
-          dmg="${files[0]}"
-          cleanup_mount() {
-            hdiutil detach "$mountpoint" -quiet -force 2>/dev/null || true
-          }
-          trap cleanup_mount EXIT
-          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mountpoint" >/dev/null
-          app_count="$(find "$mountpoint" -maxdepth 2 -type d -name '*.app' | wc -l | tr -d '[:space:]')"
-          test "$app_count" -eq 1 || { echo "Expected one app bundle in DMG, found $app_count" >&2; exit 1; }
-          app="$(find "$mountpoint" -maxdepth 2 -type d -name '*.app' -print -quit)"
-          icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")"
-          icon_name="$(basename "$icon_name")"
-          [[ "$icon_name" == *.icns ]] || icon_name="${icon_name}.icns"
-          packaged_icon="$app/Contents/Resources/$icon_name"
-          test -s "$packaged_icon"
-          dimensions="$(sips -g pixelWidth -g pixelHeight "$packaged_icon" | awk '/pixelWidth/{w=$2}/pixelHeight/{h=$2}END{if(w>0&&h>0)print "ok"}')"
-          test "$dimensions" = ok
-          cmp "$packaged_icon" src-tauri/icons/icon.icns
-          echo 'Mounted DMG app icon matches the official ICNS byte-for-byte.'
-      - name: Report macOS package validation
-        if: always() && steps.macos-dmg-staged.outcome == 'success'
-        shell: bash
-        run: |
-          if [ "${{ steps.rust-library-tests.outcome }}" = "success" ] && [ "${{ steps.verify-macos-icon.outcome }}" = "success" ]; then
-            echo 'The DMG passed Rust tests and packaged-icon validation; it remains internal until every release gate succeeds.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'The DMG is retained as an internal UNVERIFIED artifact after a post-build check failed. It cannot enter a Release.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Record macos package provenance
-        if: steps.macos-dmg-staged.outcome == 'success' && steps.rust-library-tests.outcome == 'success' && steps.verify-macos-icon.outcome == 'success'
-        run: node scripts/artifact-integrity.mjs stage macos artifacts
-      - uses: actions/upload-artifact@v4
-        id: upload-release
-        if: steps.macos-dmg-staged.outcome == 'success' && steps.rust-library-tests.outcome == 'success' && steps.verify-macos-icon.outcome == 'success'
-        with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}-run${{ github.run_id }}-attempt${{ github.run_attempt }}
-          retention-days: 14
-          path: |
-            artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
-            artifacts/macos.manifest.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        if: always() && steps.macos-dmg-staged.outcome == 'success' && (steps.rust-library-tests.outcome != 'success' || steps.verify-macos-icon.outcome != 'success')
-        with:
-          name: Open-WebUI-Client-${{ needs.prepare-release.outputs.version }}-macos-${{ matrix.arch }}-UNVERIFIED-run${{ github.run_id }}-attempt${{ github.run_attempt }}
-          path: artifacts/Open-WebUI-Client-*-macos-${{ matrix.arch }}.dmg
-          retention-days: 14
-          if-no-files-found: error
 
   android:
     needs: [prepare-release, release-quality, validate-android-signing]
@@ -528,8 +290,8 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    needs: [prepare-release, release-quality, windows, macos, android, release-emulator-smoke]
-    if: ${{ always() && needs.prepare-release.outputs.ready == 'true' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
+    needs: [prepare-release, release-quality, android, release-emulator-smoke]
+    if: ${{ always() && needs.prepare-release.outputs.ready == 'true' && needs.prepare-release.result == 'success' && needs.release-quality.result == 'success' && needs.android.result == 'success' && needs.release-emulator-smoke.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -542,20 +304,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ needs.windows.outputs.artifact_id }}
-          merge-multiple: true
-          path: release-inputs
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ needs.macos.outputs.artifact_id }}
-          merge-multiple: true
-          path: release-inputs
-      - uses: actions/download-artifact@v4
-        with:
           artifact-ids: ${{ needs.android.outputs.artifact_id }}
           merge-multiple: true
           path: release-inputs
-      - name: Publish version-pinned release after all platforms succeed
+      - name: Publish verified Android APK and checksums
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
@@ -564,14 +316,12 @@ jobs:
           RELEASE_VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
           RELEASE_RUN_ID: ${{ needs.prepare-release.outputs.run_id }}
           RELEASE_SOURCE_SHA: ${{ needs.prepare-release.outputs.commit_sha }}
-          RELEASE_WINDOWS_RESULT: ${{ needs.windows.result }}
-          RELEASE_MACOS_RESULT: ${{ needs.macos.result }}
           RELEASE_ANDROID_RESULT: ${{ needs.android.result }}
           RELEASE_ARTIFACT_DIR: release-inputs
         run: node scripts/release-orchestrator.mjs publish
 
   timing-summary:
-    needs: [prepare-lockfile, quality, validate-android-signing, prepare-release, release-quality, windows, macos, android, release-emulator-smoke, publish-release]
+    needs: [prepare-lockfile, quality, validate-android-signing, prepare-release, release-quality, android, release-emulator-smoke, publish-release]
     if: always()
     runs-on: ubuntu-22.04
     permissions:

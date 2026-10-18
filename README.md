@@ -26,11 +26,11 @@ Android 默认隐藏顶部状态栏，边缘滑动可临时显示；底部系统
 
 ## 版本
 
-每次发布时，稳定语义版本会同步写入 `package.json`、Cargo、Tauri 和两份锁文件；当前发布版本请查看[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)。运行 `npm run version:check` 检查一致性；准备新版本时使用 `node scripts/manage-version.mjs bump patch`（也支持 `minor`、`major` 或明确的递增 `X.Y.Z`）。源码中的 Android `versionCode` 为 debug 占位值 `2`。合并到 `main` 后自动发布（或手动恢复发布）时，CI 才将生成 Gradle 工程的 release `defaultConfig.versionCode` 设为 `1000 + github.run_number`；重跑同一 workflow run 使用同一代码，任何新 run 都递增。release APK 名称和 artifact 会包含该 versionCode。
+每次发布时，稳定语义版本会同步写入 `package.json`、Cargo、Tauri 和两份锁文件；当前发布版本请查看[最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)。运行 `npm run version:check` 检查一致性；准备新版本时使用 `node scripts/manage-version.mjs bump patch`（也支持 `minor`、`major` 或明确的递增 `X.Y.Z`）。源码中的 Android `versionCode` 为 debug 占位值 `2`。合并到 `main` 后自动发布（或手动恢复发布）时，CI 才将生成 Gradle 工程的 release `defaultConfig.versionCode` 设为 `100000 + android.yml 的 github.run_number`；重跑同一 workflow run 使用同一代码，任何新 run 都递增。release APK 名称和 artifact 会包含该 versionCode。
 
 ## 构建
 
-PR 执行 **Pull request quick checks**，检查源码、前端构建、版本、工作流语法及固定截图回归，不构建 APK、不读取发布密钥。合并 main 后，**Build desktop and Android packages** 自动递增 patch，固定源码 SHA，并行构建三端包与完整 API29/36 模拟器验收；全部成功后公开 Release。仅文档修改不发版。正在发布的版本不会被取消；等待中的过期提交跳过，最新 main 最终验收。需要恢复时优先使用 Actions 的 Re-run failed jobs；同一次运行保留版本、versionCode 和已构建 APK，产物及校验清单保留14天。自动候选包和独立 push 诊断已取消；手动 **Android emulator startup diagnosis** 仍可选择当前源码或基线。模拟器通过不代表 HyperOS 真机验收完成。Windows 安装包包含离线 WebView2 Runtime；macOS ad-hoc DMG 保留现有安装方式。
+PR 执行 **Pull request quick checks**，检查源码、前端构建、版本、工作流语法及固定截图回归，不构建 APK、不读取发布密钥。合并 main 后，**Android APK release** 自动递增 patch，固定源码 SHA，只构建 Android ARM64 签名 APK 与共用的 x86_64 测试 APK，执行完整 API29/36 模拟器验收；全部成功后公开 Release。仅文档修改不发版。正在发布的版本不会被取消；等待中的过期提交跳过，最新 main 最终验收。需要恢复时优先使用 Actions 的 Re-run failed jobs；同一次运行保留版本、versionCode 和已构建 APK，产物及校验清单保留14天。自动候选包和独立 push 诊断已取消；手动 **Android emulator startup diagnosis** 仍可选择当前源码或基线。模拟器通过不代表 HyperOS 真机验收完成。本次安卓修改不会触发 Windows 或 macOS 构建；桌面历史版本可继续从既有 Release 下载。
 
 首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。用 Windows PowerShell 将备份 keystore 编码到剪贴板，然后只需再设置 `ANDROID_KEYSTORE_BASE64` secret。固定别名是 `openwebui-client`，key password 复用 `ANDROID_KEYSTORE_PASSWORD`，不需要另外两个冗余 secret。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 Base64 keystore 时 workflow 会拒绝重生成。
 
