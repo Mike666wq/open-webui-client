@@ -57,6 +57,15 @@ class Fixture(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
             return
+        if self.path == "/api/config":
+            body = b'{"status":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path not in ("/", "/index.html"):
             self.send_error(404)
             return
@@ -194,6 +203,44 @@ def tap_node(node):
 
 def tap(output, label, *, timeout=30, exact=False):
     tap_node(find(output, label, timeout=timeout, exact=exact))
+
+
+def tap_exact(output, label, *, timeout=30):
+    tap(output, label, timeout=timeout, exact=True)
+
+
+def tap_picker(output):
+    deadline = time.monotonic() + 20
+    node = None
+    while time.monotonic() < deadline:
+        for item in hierarchy(output, "appearance-row"):
+            if item.get("text") == "Appearance & reading" or item.get("content-desc") == "Appearance & reading":
+                node = item
+                break
+        if node is not None:
+            break
+        time.sleep(1)
+    if node is None:
+        raise DiagnosisFailure("Missing UI control: Appearance & reading")
+    # A modal/dialog parent can expose a merged full-screen accessibility node
+    # carrying a child button's label. Tapping that node's center would hit the
+    # page underneath. The menu row is explicitly laid out beneath its heading;
+    # use the nearest clickable descendant or row-center fallback.
+    candidates = []
+    for item in hierarchy(output, "appearance-row-candidates"):
+        if "Appearance & reading" not in (
+            item.get("text", ""),
+            item.get("content-desc", ""),
+        ):
+            continue
+        item_bounds = bounds(item)
+        if item.get("clickable") == "true" or item.get("class", "").endswith("Button"):
+            candidates.append(item)
+    target = min(candidates, key=lambda item: bounds(item)[1], default=node)
+    target_bounds = bounds(target)
+    x = (target_bounds[0] + target_bounds[2]) // 2
+    y = target_bounds[1] + min(28, (target_bounds[3] - target_bounds[1]) // 2)
+    shell(f"input tap {x} {y}")
 
 
 def tap_one(output, labels, *, timeout=30):
@@ -396,15 +443,15 @@ def main():
         enter(output, f"http://127.0.0.1:{PORT}")
         marker.write_text("address-entered\n", encoding="utf-8")
         shell("input keyevent KEYCODE_BACK")
-        tap(output, "Connect")
+        tap_exact(output, "Connect")
         marker.write_text("connect-tapped\n", encoding="utf-8")
         find(output, "Wallpaper fixture 8765", timeout=45)
         marker.write_text("fixture-connected\n", encoding="utf-8")
         screenshot(output, "00-connected-original")
 
-        tap(output, "Client settings")
+        tap_exact(output, "Client settings")
         marker.write_text("menu-opened\n", encoding="utf-8")
-        tap(output, "Appearance & reading")
+        tap_picker(output)
         marker.write_text("appearance-opened\n", encoding="utf-8")
         enable_appearance(output)
         marker.write_text("appearance-enabled\n", encoding="utf-8")
@@ -412,16 +459,16 @@ def main():
         marker.write_text("scrim-zero\n", encoding="utf-8")
         set_slider_to_start(output, "Panel opacity (%)")
         marker.write_text("opacity-zero\n", encoding="utf-8")
-        tap(output, "Apply")
+        tap_exact(output, "Apply")
         marker.write_text("gradient-applied\n", encoding="utf-8")
         find(output, "Wallpaper fixture 8765", timeout=20)
         time.sleep(3)
         gradient = screenshot(output, "10-gradient")
         marker.write_text("gradient-captured\n", encoding="utf-8")
 
-        tap(output, "Client settings")
+        tap_exact(output, "Client settings")
         marker.write_text("menu-reopened\n", encoding="utf-8")
-        tap(output, "Appearance & reading")
+        tap_picker(output)
         marker.write_text("appearance-reopened\n", encoding="utf-8")
         tap(output, "Choose image (up to 20 MB)", timeout=20)
         marker.write_text("picker-opened\n", encoding="utf-8")
@@ -441,7 +488,7 @@ def main():
             raise DiagnosisFailure("Image import did not finish")
         marker.write_text("image-imported\n", encoding="utf-8")
         screenshot(output, "20-appearance-after-import")
-        tap(output, "Apply")
+        tap_exact(output, "Apply")
         marker.write_text("image-applied\n", encoding="utf-8")
         find(output, "Wallpaper fixture 8765", timeout=20)
         time.sleep(3)
