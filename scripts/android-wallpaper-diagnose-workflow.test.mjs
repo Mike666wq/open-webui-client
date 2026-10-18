@@ -29,6 +29,8 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /\.pixels\.txt/);
   assert.match(script, /preview the file/);
   assert.match(script, /not is_preview_action/);
+  assert.match(script, /Appearance image import failed/);
+  assert.match(script, /local_image and apply is not None/);
   assert.doesNotMatch(script, /find\(output, "Wallpaper fixture 8765"/);
   assert.match(script, /appearance-config\.json/);
   assert.match(script, /Persisted appearance config or decoded JPEG was not found/);

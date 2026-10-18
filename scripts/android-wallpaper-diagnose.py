@@ -333,10 +333,17 @@ def select_wallpaper(output):
             ).casefold()
             for node in nodes
         }
-        # A chooser may auto-return after one tap. Do not require its transient
-        # confirmation hierarchy; the caller verifies the appearance sheet.
-        if "appearance & reading" in labels and "choose image" in labels:
-            return
+        # A chooser may auto-return after one tap. Wait until the appearance
+        # sheet is interactable again; the caller then verifies the imported
+        # image state and checks for an explicit import failure.
+        if (
+            "appearance & reading" in labels
+            and "choose image" in labels
+            and "apply" in labels
+        ):
+            apply = find(output, "Apply", timeout=2, exact=True)
+            if apply.get("enabled", "true") == "true":
+                return
         current = {
             (node.get("text", ""), node.get("content-desc", ""), node.get("bounds", ""))
             for node in nodes
@@ -581,15 +588,29 @@ def main():
 
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
+            nodes = hierarchy(output, "after-image-import")
             text = " ".join(
                 node.get("text", "") + " " + node.get("content-desc", "")
-                for node in hierarchy(output, "after-image-import")
+                for node in nodes
             )
-            if (
-                "Importing" not in text
-                and "Choose image" in text
-                and "Apply" in text
-            ):
+            failures = (
+                "Could not import image",
+                "Use JPEG, PNG or WebP",
+                "Wallpaper unavailable",
+            )
+            if any(message in text for message in failures):
+                raise DiagnosisFailure(f"Appearance image import failed: {text[-500:]}")
+            local_image = any(node.get("text", "") == "Local image" for node in nodes)
+            apply = next(
+                (
+                    node
+                    for node in nodes
+                    if node.get("text", "") == "Apply"
+                    and node.get("enabled", "true") == "true"
+                ),
+                None,
+            )
+            if "Importing" not in text and local_image and apply is not None:
                 break
             time.sleep(1)
         else:
