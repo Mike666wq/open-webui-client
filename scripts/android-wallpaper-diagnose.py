@@ -322,24 +322,19 @@ def select_wallpaper(output):
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         nodes = hierarchy(output, "image-picker-confirm")
-        labels = {
-            " ".join(
-                value
-                for value in (
-                    node.get("text", ""),
-                    node.get("content-desc", ""),
-                )
-                if value
-            ).casefold()
+        text = " ".join(
+            value
             for node in nodes
-        }
+            for value in (node.get("text", ""), node.get("content-desc", ""))
+            if value
+        ).casefold()
         # A chooser may auto-return after one tap. Wait until the appearance
         # sheet is interactable again; the caller then verifies the imported
         # image state and checks for an explicit import failure.
         if (
-            "appearance & reading" in labels
-            and "choose image" in labels
-            and "apply" in labels
+            "appearance & reading" in text
+            and "choose image" in text
+            and "apply" in text
         ):
             apply = find(output, "Apply", timeout=2, exact=True)
             if apply.get("enabled", "true") == "true":
