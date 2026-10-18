@@ -310,7 +310,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             dialog.getButton(which)?.apply {
                 isAllCaps = false; minHeight = dp(48); setTextColor(accent)
                 if (which == AlertDialog.BUTTON_POSITIVE) {
-                    setTextColor(if (dark) Color.parseColor("#0D2047") else Color.WHITE)
+                    setTextColor(if (Color.luminance(accent) > .35f) Color.parseColor("#111827") else Color.WHITE)
                     background = GradientDrawable().apply { setColor(accent); cornerRadius = dp(12).toFloat() }
                     setPadding(dp(18), 0, dp(18), 0)
                 }

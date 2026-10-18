@@ -4,6 +4,7 @@ Pinned upstream: `open-webui/open-webui@91ea4e3421d1d8069f13d4a463fcb5986d94ea60
 
 Inspected sources:
 - `src/lib/components/chat/Chat.svelte`: `#chat-container`, `#chat-pane`, `#messages-container`, chat input and background-layer structure.
+- `src/lib/components/chat/MessageInput.svelte`: `#message-input-container`, `#chat-input-container`, `#chat-input` and send button.
 - `src/lib/components/chat/Messages.svelte`: mounted messages in a conversation log; older history is loaded separately.
 - `src/lib/components/chat/Messages/UserMessage.svelte`: `.user-message#message-{id}`, `.markdown-prose` / `.whitespace-pre-wrap` content.
 
