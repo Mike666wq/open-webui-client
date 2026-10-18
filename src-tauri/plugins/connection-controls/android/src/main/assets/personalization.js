@@ -34,6 +34,9 @@
     const surface = dark ? '17,19,24' : '248,250,252';
     const alpha = clamp(c.opacity, 50, 100, 90) / 100;
     const accent = /^#[0-9a-f]{6}$/i.test(c.accent) ? c.accent : '#2563eb';
+    const rgb = parseInt(accent.slice(1), 16);
+    const luminance = [16,8,0].map(shift => ((rgb >> shift) & 255)/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4);
+    const ink = luminance[0]*.2126+luminance[1]*.7152+luminance[2]*.0722 > .2 ? '#111827' : '#ffffff';
     const scope = `html[${marker}]`;
     const css = `
 ${scope}, ${scope} body { background:transparent!important; color:${text}!important; color-scheme:${dark ? 'dark' : 'light'}; }
@@ -50,7 +53,7 @@ ${scope} #chat-container pre { background:${dark ? '#20242c' : '#edf1f7'}!import
 ${scope} #chat-container :is(a,button[aria-pressed="true"]) { color:${accent}!important; }
 ${scope} #chat-container :is(.text-gray-500,.text-gray-400) { color:${muted}!important; }
 ${scope} #chat-container :is(.text-gray-100,.text-gray-200,.text-gray-700,.text-gray-800,.text-gray-900,.text-black) { color:${text}!important; }
-${scope} #send-message-button { background-color:${accent}!important; color:#fff!important; }
+${scope} #send-message-button { background-color:${accent}!important; color:${ink}!important; }
 ${scope} #chat-input { color:${text}!important; caret-color:${accent}; }
 `;
     let style = doc.getElementById(key);

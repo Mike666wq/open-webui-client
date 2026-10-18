@@ -56,10 +56,10 @@ internal data class AppearanceConfig(
             )
         }
         fun preset(id: String, current: AppearanceConfig): AppearanceConfig = when (id) {
-            "sage" -> current.copy(preset=id, accent="#437C78", opacity=85)
-            "sand" -> current.copy(preset=id, accent="#A16B45", opacity=90)
+            "sage" -> current.copy(preset=id, accent="#437C78", opacity=85, background=if(current.background=="solid") "gradient" else current.background)
+            "sand" -> current.copy(preset=id, accent="#A16B45", opacity=90, background=if(current.background=="solid") "gradient" else current.background)
             "reading" -> current.copy(preset=id, background="solid", opacity=100, dim=0, blur=0)
-            else -> current.copy(preset="blue", accent="#2563EB", opacity=90)
+            else -> current.copy(preset="blue", accent="#2563EB", opacity=90, background=if(current.background=="solid") "gradient" else current.background)
         }
     }
 }

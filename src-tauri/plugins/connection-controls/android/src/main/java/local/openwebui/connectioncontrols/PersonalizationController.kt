@@ -99,6 +99,7 @@ internal class PersonalizationController(
     }
     init {
         wallpaper.isClickable=false; wallpaper.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        image.addOnLayoutChangeListener { _,_,_,_,_,_,_,_,_ -> positionImage() }
         wallpaper.addView(image,FrameLayout.LayoutParams(-1,-1)); wallpaper.addView(scrim,FrameLayout.LayoutParams(-1,-1))
         val parent=webView.parent as ViewGroup
         parent.addView(wallpaper,parent.indexOfChild(webView),FrameLayout.LayoutParams(1,1))
