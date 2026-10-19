@@ -208,6 +208,16 @@ class Fixture(BaseHTTPRequestHandler):
         backgroundImage: bubbleStyle.backgroundImage
       }} : null
     }};
+    let evidence = document.getElementById('owc-layer-evidence');
+    if (!evidence) {{
+      evidence = document.createElement('div');
+      evidence.id = 'owc-layer-evidence';
+      evidence.setAttribute('role', 'note');
+      evidence.style.cssText = 'position:fixed;left:8px;bottom:8px;width:1px;height:1px;opacity:0.01;overflow:hidden;pointer-events:none';
+      document.body.appendChild(evidence);
+    }}
+    evidence.textContent = 'OWC-LAYERS ' + JSON.stringify(details);
+    evidence.setAttribute('aria-label', evidence.textContent);
     fetch('/__fixture_state', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
@@ -615,23 +625,36 @@ def image_compare(before, after, output):
 
 
 def verify_wallpaper_layers(output):
-    with FIXTURE_LOCK:
-        events = list(FIXTURE_EVENTS)
-    states = [
-        event
-        for event in events
-        if event.get("kind") == "page-state"
-        and event.get("appearanceEnabled") is True
-        and isinstance(event.get("messages"), dict)
-        and isinstance(event.get("navigation"), dict)
-        and isinstance(event.get("input"), dict)
-        and isinstance(event.get("bubble"), dict)
-    ]
-    if not states:
+    deadline = time.monotonic() + 20
+    state = None
+    while time.monotonic() < deadline:
+        for node in hierarchy(output, "wallpaper-layer-state"):
+            description = node.get("content-desc", "")
+            if not description.startswith("OWC-LAYERS "):
+                continue
+            try:
+                candidate = json.loads(description.removeprefix("OWC-LAYERS "))
+            except json.JSONDecodeError:
+                continue
+            if (
+                candidate.get("appearanceEnabled") is True
+                and isinstance(candidate.get("messages"), dict)
+                and isinstance(candidate.get("navigation"), dict)
+                and isinstance(candidate.get("input"), dict)
+                and isinstance(candidate.get("bubble"), dict)
+            ):
+                state = candidate
+                break
+        if state is not None:
+            break
+        time.sleep(1)
+    if state is None:
         raise DiagnosisFailure(
-            "The page reported no computed wallpaper layers after appearance was enabled"
+            "The live WebView reported no computed wallpaper layers"
         )
-    state = states[-1]
+    (output / "surface-layers.json").write_text(
+        json.dumps(state, indent=2) + "\n", encoding="utf-8"
+    )
     try:
         messages_alpha = float(
             re.fullmatch(
