@@ -6,10 +6,12 @@ on:
     branches:
       - codex/android-wallpaper-diagnose
       - codex/android-wallpaper-preview-fix
+      - codex/android-glass-new-chat
     paths:
       - .github/workflows/android-wallpaper-diagnose.yml
       - scripts/android-wallpaper-diagnose.py
       - scripts/android-wallpaper-diagnose-workflow.test.mjs
+      - scripts/fixtures/personalization/**
       - src-tauri/src/connection.rs
       - src-tauri/plugins/connection-controls/android/**
 

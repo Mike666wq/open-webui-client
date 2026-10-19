@@ -13,11 +13,13 @@
   const chatInput = chat?.querySelector('#chat-input') || doc.querySelector('#chat-input') ||
     doc.querySelector('#message-input') || doc.querySelector('textarea[aria-label]') ||
     chat?.querySelector('[contenteditable="true"]');
+  // Open WebUI mounts the same chat shell on `/` before a new chat has any
+  // messages. The absence of `#messages-container` is a valid empty state.
   const supported = location.origin === request.origin &&
     (location.pathname === '/' || location.pathname.startsWith('/c/')) &&
-    !!chat && !!messages && !!chatInput;
+    !!chat && !!chatInput;
   const page = location.origin + location.pathname + location.search;
-  const rows = supported ? Array.from(messages.querySelectorAll('.user-message[id^="message-"]'))
+  const rows = supported && messages ? Array.from(messages.querySelectorAll('.user-message[id^="message-"]'))
     .filter(node => !node.hidden && node.getAttribute('aria-hidden') !== 'true') : [];
   const entries = request.navigation ? rows.map(node => {
     const content = node.querySelector('.markdown-prose, .whitespace-pre-wrap');
@@ -47,18 +49,29 @@
     const scope = `html[${marker}]`;
     const css = `
 ${scope}, ${scope} body { background:transparent!important; color:${text}!important; color-scheme:${dark ? 'dark' : 'light'}; }
-${scope} [${surfaceMarker}] { background-color:transparent!important; background-image:none!important; }
+${scope} [${surfaceMarker}], ${scope} :is(.app, .app > div, #chat-container, #chat-container > div, #chat-pane, #message-input-dropzone) { background-color:transparent!important; background-image:none!important; }
 ${scope} body > #app, ${scope} #app > div, ${scope} #app > div > div,
-${scope} #app > div > main, ${scope} #app > div > main > div, ${scope} #chat-container,
-${scope} #chat-container > div, ${scope} #chat-container > div > div,
+${scope} #app > div > main, ${scope} #app > div > main > div,
+${scope} #chat-container, ${scope} #chat-container > div, ${scope} #chat-container > div > div,
 ${scope} #chat-container > div > div > div, ${scope} #chat-pane,
 ${scope} #messages-container { background-color:transparent!important; background-image:none!important; }
 ${scope} #chat-container > div > .pointer-events-none.absolute { display:none!important; }
 ${scope} #chat-container { color:${text}!important; --color-gray-50:${dark ? '#20242c' : '#f8fafc'}; --color-gray-850:${dark ? '#20242c' : '#edf1f7'}; }
-${scope} #chat-container :is(nav, #message-input, #message-input-container, #chat-input-container, #message-input-dropzone, .user-message .rounded-3xl), ${scope} #sidebar { background-color:rgba(${surface},${alpha})!important; color:${text}!important; }
+${scope} #chat-container :is(nav, #message-input-container, .user-message .rounded-3xl, .chat-assistant), ${scope} #sidebar {
+  background-color:rgba(${surface},${alpha})!important;
+  background-image:linear-gradient(${dark ? 'rgba(0,0,0,.24)' : 'rgba(255,255,255,.38)'},${dark ? 'rgba(0,0,0,.10)' : 'rgba(255,255,255,.24)'})!important;
+  -webkit-backdrop-filter:blur(18px) saturate(145%)!important;
+  backdrop-filter:blur(18px) saturate(145%)!important;
+  border:1px solid ${dark ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.58)'}!important;
+  box-shadow:0 8px 28px ${dark ? 'rgba(0,0,0,.20)' : 'rgba(15,23,42,.10)'}!important;
+  color:${text}!important;
+}
+${scope} #chat-container .chat-assistant { box-sizing:border-box; border-radius:20px; padding:14px 16px; margin-block:8px; }
+${scope} #chat-container :is(#chat-input-container,.ProseMirror,textarea) { background-color:transparent!important; background-image:none!important; }
 ${scope} #chat-container :is(.markdown-prose,.whitespace-pre-wrap) { color:${text}!important; font-size:${clamp(c.fontSize,14,24,16)}px!important; line-height:${clamp(c.lineHeight,130,210,165)/100}!important; }
 ${scope} #chat-container :is(pre,code) { font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important; line-height:1.5!important; }
 ${scope} #chat-container pre { background:${dark ? '#20242c' : '#edf1f7'}!important; color:${text}!important; }
+${scope} #chat-container :not(pre) > code { background:${dark ? '#303743' : '#e2e8f0'}!important; color:${text}!important; }
 ${scope} #chat-container :is(a,button[aria-pressed="true"]) { color:${accent}!important; }
 ${scope} #chat-container :is(.text-gray-500,.text-gray-400) { color:${muted}!important; }
 ${scope} #chat-container :is(.text-gray-100,.text-gray-200,.text-gray-700,.text-gray-800,.text-gray-900,.text-black) { color:${text}!important; }
@@ -82,6 +95,9 @@ ${scope} :is(#chat-input,#message-input,textarea[aria-label],[contenteditable="t
           style.backgroundColor !== 'transparent');
       if (hasPaint || node === chat || node.parentElement === root) opaqueLayers.push(node);
     }
+    // The root layout can repaint while Svelte remounts the new-chat shell.
+    const app = doc.querySelector('.app');
+    if (app && app !== root) opaqueLayers.push(app);
     for (const node of opaqueLayers.slice(0, 12)) {
       if (node !== root) node.setAttribute(surfaceMarker, '');
     }

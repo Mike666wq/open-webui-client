@@ -7,7 +7,10 @@ Inspected sources:
 - `src/lib/components/chat/MessageInput.svelte`: `#message-input-container`, `#chat-input-container`, `#chat-input` and send button.
 - `src/lib/components/chat/Messages.svelte`: mounted messages in a conversation log; older history is loaded separately.
 - `src/lib/components/chat/Messages/UserMessage.svelte`: `.user-message#message-{id}`, `.markdown-prose` / `.whitespace-pre-wrap` content.
+- `src/lib/components/chat/Messages/ResponseMessage.svelte`: `.chat-assistant` wraps reply content, including code and citations.
 
 `chat.html` is an independently written minimal structural fixture. It does not embed upstream application code, branding or assets. Actual older/newer server releases are supported only when the required structural hooks are present; this is not a promise of universal version compatibility. Unknown structures, login and administration routes are left unchanged.
 
 For static browser review, serve a temporary copy on loopback; copy the Android asset as `adapter.js`, prefixed with `window.fixtureAdapter = `. Do not generate tracked assets. Browser visual checks are distinct from native-device validation.
+
+Glass surfaces combine a translucent tint, a highlight, a border and a shadow. CSS backdrop blur is progressive: the native wallpaper is a sibling of the WebView, so page CSS cannot blur that native image. The tint must keep replies readable independently of backdrop-filter support; the wallpaper stays in the native layer.
