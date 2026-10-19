@@ -33,6 +33,9 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /fixture-events\.json/);
   assert.match(script, /__fixture_state/);
   assert.match(script, /invokeType/);
+  assert.match(script, /def ensure_device_root/);
+  assert.match(script, /def ensure_fixture_reverse/);
+  assert.match(script, /adb root restarts the daemon/);
   const connection = await readFile(
     new URL('../src-tauri/src/connection.rs', import.meta.url),
     'utf8',

@@ -71,6 +71,26 @@ def shell(value, *, check=True, timeout=60):
     return adb("shell", value, check=check, timeout=timeout)
 
 
+def ensure_device_root():
+    """Elevate adbd before fixture forwarding; adb root restarts the daemon."""
+    if shell("id -u", check=False).strip() == "0":
+        return
+    adb("root", check=False, timeout=30)
+    time.sleep(2)
+    adb("wait-for-device", check=False, timeout=30)
+
+
+def ensure_fixture_reverse():
+    forwarding = f"tcp:{PORT}"
+    adb("reverse", forwarding, forwarding)
+    mappings = adb("reverse", "--list")
+    record_fixture_event("reverse-configured", {"mappings": mappings})
+    if forwarding not in mappings:
+        raise DiagnosisFailure(
+            f"Android fixture forwarding was not established: {mappings!r}"
+        )
+
+
 def screenshot(output, label):
     result = command(["adb", "exec-out", "screencap", "-p"], timeout=45, text=False)
     path = output / f"{label}.png"
@@ -529,11 +549,6 @@ def switch_is_checked(output, label):
 
 def install_reported_config(output):
     """Seed only the per-origin appearance config, never login or chat state."""
-    root = shell("id -u", check=False).strip()
-    if root != "0":
-        adb("root", check=False, timeout=30)
-        time.sleep(2)
-        adb("wait-for-device", check=False, timeout=30)
     origin = f"http://127.0.0.1:{PORT}"
     digest = hashlib.sha256(origin.encode()).hexdigest()
     directory = f"/data/user/0/{PACKAGE}/no_backup/appearance"
@@ -628,6 +643,7 @@ def main():
     (output / "source-sha.txt").write_text(args.source_sha + "\n", encoding="utf-8")
 
     capture_device_state(output)
+    ensure_device_root()
     wallpaper = output / IMAGE_NAME
     write_test_png(wallpaper)
     shell("mkdir -p /sdcard/Download")
@@ -640,10 +656,12 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Fixture)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    adb("reverse", f"tcp:{PORT}", f"tcp:{PORT}")
     try:
         shell(f"pm clear {PACKAGE}")
         install_reported_config(output)
+        # Keep aliases above this boundary stable. Both adb root and package
+        # resets can invalidate or race device forwarding.
+        ensure_fixture_reverse()
         # The picker is normally opened from the appearance sheet, but the
         # first run showed the test session terminating before that stage.
         # Keep a visible marker so UI failures identify the last completed
