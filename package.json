@@ -8,7 +8,7 @@
     "prebuild": "node scripts/generate-client-config.mjs && node scripts/prepare-assets.mjs && node scripts/prepare-bundled-frontend.mjs --if-android",
     "tauri": "tauri",
     "build": "vite build",
-    "test": "node --test scripts src/app.test.js",
+    "test": "node --test scripts/*.test.mjs scripts/*.test.js src/app.test.js",
     "version:check": "node scripts/manage-version.mjs check",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "frontend:prepare": "node scripts/prepare-bundled-frontend.mjs"
