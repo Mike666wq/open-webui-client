@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Android wallpaper fixture</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    html { margin: 0; height: 100%; background: #e2eaf6; }
+    body { margin: 0; height: 100%; background: #fff; color: #111827; font: 16px system-ui; }
+    .app, .app > div, #app { height: 100dvh; background: #fff; }
+    #app > main { display: contents; }
+    #chat-container { background: #fff; }
+    #chat-container > div { height: 100%; background: #fff; }
+    #chat-container { height: 100dvh; display: flex; flex-direction: column; }
+    #chat-pane { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+    nav { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fff; }
+    nav strong { flex: 1; font-size: 13px; }
+    nav button { min-height: 48px; padding: 8px; border: 0; border-radius: 12px; background: #e2e8f0; color: #111827; }
+    #messages-container { min-height: 0; flex: 1; overflow: auto; padding: 16px; }
+    .user-message { display: flex; justify-content: flex-end; margin: 12px 0; }
+    .rounded-3xl { max-width: 88%; padding: 12px; border-radius: 20px; background: #f3f4f6; }
+    .chat-assistant { margin: 12px 0; line-height: 1.65; }
+    pre { padding: 12px; overflow: auto; border-radius: 12px; background: #f3f4f6; }
+    #message-input-container { margin: 12px; padding: 12px; border-radius: 24px; background: #fff; }
+    #chat-input-container { background: #fff; }
+    #chat-input { width: 100%; min-height: 48px; border: 0; border-radius: 12px; padding: 10px; }
+    #new-chat-welcome { min-height: 0; flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="app"><div><div id="app"><main>
+    <div id="chat-container"><div><div id="chat-pane">
+      <nav>
+        <strong id="fixture-header">Wallpaper fixture 8765</strong>
+        <button id="new-chat" type="button">New chat</button>
+        <button id="restore-chat" type="button">Restore chat</button>
+      </nav>
+      <div id="messages-container">
+        <div class="user-message" id="message-wallpaper-1"><div class="rounded-3xl"><div class="markdown-prose">Verify the selected local wallpaper.</div></div></div>
+        <div id="message-wallpaper-response-1"><div class="chat-assistant"><div id="response-content-container" class="markdown-prose">
+          <p>Reply text needs a readable glass surface over a vivid wallpaper.</p>
+          <p>Long replies, lists and <code>inline code</code> stay readable.</p>
+          <pre><code>const wallpaper = 'kept';</code></pre>
+        </div></div></div>
+        <div class="user-message" id="message-wallpaper-2"><div class="rounded-3xl"><div class="markdown-prose">The wallpaper also stays visible after creating a new chat.</div></div></div>
+      </div>
+      <div id="message-input-container"><div id="chat-input-container"><textarea id="chat-input" aria-label="Message">wallpaper diagnostic</textarea></div></div>
+    </div></div></div>
+  </main></div></div></div>
+  <script>
+    (() => {
+      const started = Date.now();
+      const nonce = String(started) + '-' + Math.random().toString(36).slice(2);
+      const shell = document.querySelector('.app > div');
+      const conversation = shell.innerHTML;
+      let reports = 0;
+      function paint(selector) {
+        const node = document.querySelector(selector);
+        if (!node) return null;
+        const style = getComputedStyle(node);
+        return {
+          backgroundColor: style.backgroundColor,
+          backgroundImage: style.backgroundImage,
+          color: style.color,
+          borderRadius: style.borderRadius
+        };
+      }
+      function report() {
+        const controls = {};
+        for (const id of ['new-chat', 'restore-chat']) {
+          const rect = document.getElementById(id).getBoundingClientRect();
+          controls[id] = [rect.left, rect.top, rect.right, rect.bottom];
+        }
+        const tauri = window.__TAURI__;
+        const core = tauri && tauri.core;
+        fetch('/__fixture_state', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            elapsedMs: Date.now() - started,
+            reports: ++reports,
+            nonce,
+            readyState: document.readyState,
+            href: location.href,
+            path: location.pathname,
+            width: innerWidth,
+            height: innerHeight,
+            controls,
+            hasMessages: !!document.getElementById('messages-container'),
+            hasInput: !!document.getElementById('chat-input'),
+            draft: document.getElementById('chat-input').value,
+            tauriType: typeof tauri,
+            coreType: typeof core,
+            invokeType: typeof (core && core.invoke),
+            appearanceEnabled: document.documentElement.hasAttribute('data-owc-appearance'),
+            app: paint('.app'),
+            shell: paint('.app > div'),
+            chat: paint('#chat-container'),
+            messages: paint('#messages-container'),
+            input: paint('#message-input-container'),
+            innerInput: paint('#chat-input-container'),
+            bubble: paint('.user-message .rounded-3xl'),
+            response: paint('.chat-assistant')
+          }),
+          cache: 'no-store'
+        }).catch(() => {});
+      }
+      function bindNavigation() {
+        document.getElementById('new-chat').onclick = () => navigate('/');
+        document.getElementById('restore-chat').onclick = () => navigate('/c/restored');
+      }
+      function navigate(path) {
+        history.pushState({}, '', path);
+        shell.innerHTML = conversation;
+        if (path === '/') {
+          document.getElementById('messages-container').remove();
+          const welcome = document.createElement('div');
+          welcome.id = 'new-chat-welcome';
+          welcome.textContent = 'New conversation';
+          document.getElementById('chat-pane').insertBefore(welcome, document.getElementById('message-input-container'));
+        }
+        bindNavigation();
+        report();
+      }
+      history.replaceState({}, '', '/c/original');
+      bindNavigation();
+      report();
+      setInterval(report, 500);
+    })();
+  </script>
+</body>
+</html>

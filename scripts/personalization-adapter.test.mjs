@@ -55,10 +55,10 @@ test('supported page styles apply idempotently and removal restores host attribu
   const f=fixture(); assert.equal(f.invoke().supported,true); f.invoke(); assert.equal(f.styles.size,1);
   assert.ok(f.styles.values().next().value.textContent.includes('monospace'));
   const css=f.styles.values().next().value.textContent;
-  assert.match(css, /#chat-container :is\(nav, #message-input, #message-input-container/);
+  assert.match(css, /#chat-container :is\(nav, #message-input-container, \.user-message \.rounded-3xl, \.chat-assistant\)/);
   assert.match(css, /backdrop-filter:blur\(18px\) saturate\(145%\)!important/);
   assert.match(css, /border:1px solid rgba\(255,255,255,\.10\)!important/);
-  assert.match(css, /#chat-input-container,\.ProseMirror,textarea\) \{ background-color:transparent!important; \}/);
+  assert.match(css, /#chat-input-container,\.ProseMirror,textarea\) \{ background-color:transparent!important; background-image:none!important; \}/);
   assert.match(
     f.styles.values().next().value.textContent,
     /#messages-container \{ background-color:transparent!important; background-image:none!important; \}/,
@@ -69,6 +69,17 @@ test('supported page styles apply idempotently and removal restores host attribu
   );
   assert.deepEqual([...f.surfaces.keys()].sort(),['chat','opaque-inner','shell']);
   f.invoke({config:{enabled:false}}); assert.equal(f.styles.size,0); assert.equal(f.attributes.size,0); assert.equal(f.surfaces.size,0);
+});
+test('both themes protect reply text without stacking glass on nested input containers',()=>{
+  for(const dark of [false,true]) {
+    const f=fixture(); f.invoke({config:{enabled:true,dark,opacity:50}});
+    const css=f.styles.values().next().value.textContent;
+    assert.match(css,/\.chat-assistant \{ box-sizing:border-box; border-radius:20px; padding:14px 16px/);
+    assert.ok(css.includes(`background-color:rgba(${dark?'17,19,24':'248,250,252'},0.5)`));
+    assert.ok(css.includes(dark?'rgba(0,0,0,.24)':'rgba(255,255,255,.38)'));
+    assert.doesNotMatch(css,/:is\(nav,[^\n]*#chat-input-container/);
+    assert.match(css,/:not\(pre\) > code/);
+  }
 });
 test('new chat root keeps the glass shell before messages exist and after returning to a conversation',()=>{
   const f=fixture(); f.clearMessages(); f.location.pathname='/';

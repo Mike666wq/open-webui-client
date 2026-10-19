@@ -140,88 +140,10 @@ class Fixture(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if self.path not in ("/", "/index.html"):
+        if self.path not in ("/", "/index.html", "/c/original", "/c/restored"):
             self.send_error(404)
             return
-        body = b"""<!doctype html>
-<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; }
-  html { margin: 0; min-height: 100%; background: #e2eaf6; }
-  body { margin: 0; min-height: 100%; background: #fff; color: #111827; }
-  .app { min-height: 100dvh; background: #fff; }
-  .app > div { min-height: 100dvh; background: #fff; }
-  #app { min-height: 100dvh; background: #fff; }
-  #app > main { display: contents; }
-  #chat-container { background: #fff; }
-  #chat-container > div, #chat-container > div > div { background: #fff; }
-  #chat-container > div > div > div { background: #fff; }
-  #chat-container { min-height: 100dvh; display: flex; flex-direction: column; }
-  #chat-container > div { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-  #chat-pane { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-  nav { padding: 12px 18px; background: rgba(255,255,255,.82); }
-  #messages-container { min-height: 0; flex: 1; overflow: auto; padding: 18px; }
-  .user-message { display: flex; justify-content: flex-end; margin: 18px 0; }
-  .rounded-3xl { max-width: 88%; padding: 12px 14px; border-radius: 18px; background: rgba(255,255,255,.84); }
-  #message-input-container { padding: 12px; background: rgba(255,255,255,.82); }
-  #chat-input { width: 100%; min-height: 48px; border: 1px solid #64748b; border-radius: 12px; padding: 10px; }
-</style></head>
-<body><div class="app"><div><div id="app"><main><div id="chat-container"><div><div><div><div id="chat-pane">
-  <nav><strong id="fixture-header">Wallpaper fixture 8765</strong></nav>
-  <div id="messages-container">
-    <div class="user-message" id="message-wallpaper-1"><div class="rounded-3xl"><div class="markdown-prose">Verify the selected local wallpaper.</div></div></div>
-    <div class="user-message" id="message-wallpaper-2"><div class="rounded-3xl"><div class="markdown-prose">The image should be visible through this transparent chat surface.</div></div></div>
-  </div>
-  <div id="message-input-container"><textarea id="chat-input" aria-label="Message">wallpaper diagnostic</textarea></div>
-</div></div></div></div></div></main></div></div></div>
-<script>
-(() => {{
-  const started = Date.now();
-  let reports = 0;
-  function report() {{
-    const tauri = window.__TAURI__;
-    const core = tauri && tauri.core;
-    const paint = id => {{
-      const node = document.getElementById(id);
-      if (!node) return null;
-      const style = getComputedStyle(node);
-      return {{
-        backgroundColor: style.backgroundColor,
-        backgroundImage: style.backgroundImage
-      }};
-    }};
-    const bubble = document.querySelector('.user-message .rounded-3xl');
-    const bubbleStyle = bubble && getComputedStyle(bubble);
-    const details = {{
-      elapsedMs: Date.now() - started,
-      reports: ++reports,
-      readyState: document.readyState,
-      href: location.href,
-      tauriType: typeof tauri,
-      coreType: typeof core,
-      invokeType: typeof (core && core.invoke),
-      appearanceEnabled: document.documentElement.hasAttribute('data-owc-appearance'),
-      messages: paint('messages-container'),
-      navigation: paint('fixture-header'),
-      input: paint('message-input-container'),
-      bubble: bubbleStyle ? {{
-        backgroundColor: bubbleStyle.backgroundColor,
-        backgroundImage: bubbleStyle.backgroundImage
-      }} : null
-    }};
-    fetch('/__fixture_state', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify(details),
-      cache: 'no-store'
-    }}).catch(() => {{}});
-  }}
-  report();
-  const timer = setInterval(report, 500);
-  setTimeout(() => clearInterval(timer), 120000);
-}})();
-</script></body></html>"""
+        body = (Path(__file__).parent / "fixtures/personalization/android.html").read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -344,6 +266,65 @@ def wait_for_web_page(output, *, timeout=45):
             return
         time.sleep(1)
     raise DiagnosisFailure("Connected WebView did not render within the expected time")
+
+
+def wait_fixture_state(path, *, appearance=None, timeout=30):
+    """Reports come only from our synthetic page; no application test bridge."""
+    deadline = time.monotonic() + timeout
+    latest = None
+    while time.monotonic() < deadline:
+        with FIXTURE_LOCK:
+            latest = next(
+                (dict(item) for item in reversed(FIXTURE_EVENTS) if item["kind"] == "page-state"),
+                None,
+            )
+        if (
+            latest
+            and time.monotonic() - latest["elapsed"] < 3
+            and latest.get("path") == path
+            and latest.get("hasInput")
+            and latest.get("hasMessages") == (path != "/")
+            and (appearance is None or latest.get("appearanceEnabled") is appearance)
+        ):
+            return latest
+        time.sleep(0.25)
+    raise DiagnosisFailure(f"Fixture did not reach {path}: {latest}")
+
+
+def tap_fixture_control(output, label, state):
+    # WebView accessibility can omit DOM controls. Convert fixture-reported
+    # rectangles to screen coordinates, then send the same real adb touch.
+    nodes = hierarchy(output, label)
+    view = next((node for node in nodes if node.get("class", "").endswith("WebView")), None)
+    rect = state.get("controls", {}).get(label)
+    if view is None or not rect or len(rect) != 4 or state.get("width", 0) <= 0:
+        raise DiagnosisFailure(f"Fixture control geometry unavailable: {label}")
+    left, top, right, bottom = bounds(view)
+    scale = (right - left) / state["width"]
+    x = left + (rect[0] + rect[2]) * scale / 2
+    y = top + (rect[1] + rect[3]) * scale / 2
+    if not left < x < right or not top < y < bottom:
+        raise DiagnosisFailure(f"Fixture control outside the WebView: {label}")
+    shell(f"input tap {round(x)} {round(y)}")
+
+
+def assert_fixture_glass(state, nonce):
+    if state.get("nonce") != nonce or state.get("draft") != "wallpaper diagnostic":
+        raise DiagnosisFailure("Applying appearance reloaded the page or changed its draft")
+    for name in ("app", "shell", "chat", "messages"):
+        paint = state.get(name)
+        if name == "messages" and state["path"] == "/":
+            continue
+        if not paint or paint["backgroundColor"] not in ("rgba(0, 0, 0, 0)", "transparent"):
+            raise DiagnosisFailure(f"Opaque page layer hides the wallpaper: {name}={paint}")
+    for name in ("input", "bubble", "response"):
+        paint = state.get(name)
+        if state["path"] == "/" and name != "input":
+            continue
+        if not paint or "linear-gradient" not in paint["backgroundImage"]:
+            raise DiagnosisFailure(f"Readable glass surface missing: {name}={paint}")
+    if state.get("innerInput", {}).get("backgroundColor") != "rgba(0, 0, 0, 0)":
+        raise DiagnosisFailure("Nested input container stacked another opaque surface")
 
 
 def write_fixture_evidence(output: Path) -> None:
@@ -625,7 +606,7 @@ def screenshot_wallpaper_metrics(image, output):
     reaches the Android frame with strong colour and non-trivial variation.
     """
     crop = f"{max(1, int(image_width(image)) - 24)}x{max(1, int(image_height(image)) - 260)}+12+170"
-    page = output / "wallpaper-visible-page.png"
+    page = output / f"{image.stem}-wallpaper-visible-page.png"
     command(["convert", str(image), "-crop", crop, "+repage", str(page)])
     metrics = command(
         [
@@ -647,7 +628,7 @@ def screenshot_wallpaper_metrics(image, output):
             f"Could not measure wallpaper visibility: {metrics}"
         )
     saturation, variance = map(float, metrics)
-    (output / "wallpaper-visual-metrics.txt").write_text(
+    (output / f"{image.stem}-wallpaper-visual-metrics.txt").write_text(
         f"saturation={saturation:.6f}\nvariance={variance:.6f}\n", encoding="utf-8"
     )
     if saturation < 0.20:
@@ -766,6 +747,8 @@ def main():
         tap_exact(output, "Connect")
         marker.write_text("connect-tapped\n", encoding="utf-8")
         wait_for_web_page(output, timeout=45)
+        initial_state = wait_fixture_state("/c/original", appearance=False)
+        document_nonce = initial_state["nonce"]
         marker.write_text("fixture-connected\n", encoding="utf-8")
         screenshot(output, "00-connected-original")
 
@@ -853,21 +836,22 @@ def main():
         marker.write_text(f"pixel-compare-passed:{normalized_difference:.6f}\n", encoding="utf-8")
         visual = screenshot_wallpaper_metrics(image, output)
         marker.write_text("wallpaper-visible-contract-passed\n", encoding="utf-8")
+        conversation_state = wait_fixture_state("/c/original", appearance=True)
+        assert_fixture_glass(conversation_state, document_nonce)
 
-        # Follow the reported path: conversation -> new chat -> another
-        # conversation. Use the service's own URL handling rather than an
-        # unreliable page-position tap.
-        shell("am start -a android.intent.action.VIEW -d http://127.0.0.1:8765/ local.openwebui.client")
+        tap_fixture_control(output, "new-chat", conversation_state)
         marker.write_text("new-chat-opened\n", encoding="utf-8")
-        wait_for_web_page(output, timeout=30)
-        time.sleep(3)
+        new_chat_state = wait_fixture_state("/", appearance=True)
+        assert_fixture_glass(new_chat_state, document_nonce)
+        time.sleep(1)
         new_chat = screenshot(output, "30-new-chat")
         new_chat_metrics = screenshot_wallpaper_metrics(new_chat, output)
         marker.write_text("new-chat-wallpaper-passed\n", encoding="utf-8")
-        shell("am start -a android.intent.action.VIEW -d http://127.0.0.1:8765/c/restored local.openwebui.client")
+        tap_fixture_control(output, "restore-chat", new_chat_state)
         marker.write_text("restore-chat-opened\n", encoding="utf-8")
-        wait_for_web_page(output, timeout=30)
-        time.sleep(3)
+        restored_state = wait_fixture_state("/c/restored", appearance=True)
+        assert_fixture_glass(restored_state, document_nonce)
+        time.sleep(1)
         restored = screenshot(output, "40-restored-chat")
         restored_metrics = screenshot_wallpaper_metrics(restored, output)
         marker.write_text("restored-chat-wallpaper-passed\n", encoding="utf-8")
@@ -883,6 +867,8 @@ def main():
             "new_chat_variance": new_chat_metrics["variance"],
             "restored_chat_saturation": restored_metrics["saturation"],
             "restored_chat_variance": restored_metrics["variance"],
+            "same_document": restored_state["nonce"] == document_nonce,
+            "glass_surfaces_verified": True,
             "persisted_background": persisted.get("background"),
             "persisted_image": persisted.get("image"),
         }

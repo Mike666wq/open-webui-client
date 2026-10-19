@@ -11,6 +11,7 @@ on:
       - .github/workflows/android-wallpaper-diagnose.yml
       - scripts/android-wallpaper-diagnose.py
       - scripts/android-wallpaper-diagnose-workflow.test.mjs
+      - scripts/fixtures/personalization/**
       - src-tauri/src/connection.rs
       - src-tauri/plugins/connection-controls/android/**
 
