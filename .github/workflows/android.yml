@@ -180,6 +180,8 @@ jobs:
           key: android-arm64
       - name: Install frontend dependencies
         run: npm ci
+      - name: Prepare and verify pinned official frontend assets
+        run: npm run frontend:prepare
       - name: Fetch locked Rust dependencies
         run: |
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml

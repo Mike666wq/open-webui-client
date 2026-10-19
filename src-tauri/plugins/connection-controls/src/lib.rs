@@ -105,6 +105,7 @@ pub struct NativeClientState {
     pub phase: String,
     pub candidate_url: Option<String>,
     pub last_success_url: Option<String>,
+    pub recent_urls: Vec<String>,
     pub error_code: Option<String>,
 }
 
@@ -138,6 +139,26 @@ impl<R: Runtime> Clone for ConnectionControlsBridge<R> {
 }
 
 impl<R: Runtime> ConnectionControlsBridge<R> {
+    #[cfg(target_os = "android")]
+    pub async fn prepare_bundled_frontend(
+        &self,
+        origin: String,
+        generation: u64,
+    ) -> Result<(), String> {
+        #[derive(Serialize)]
+        struct Args {
+            origin: String,
+            generation: u64,
+        }
+        self.handle
+            .run_mobile_plugin_async::<()>(
+                "prepareBundledFrontend",
+                Args { origin, generation },
+            )
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     #[cfg(target_os = "android")]
     pub async fn install_native_actions(
         &self,

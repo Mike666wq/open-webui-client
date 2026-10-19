@@ -32,6 +32,14 @@ class ClientPolicyTest {
         assertFalse(ClientPolicy.sameOrigin("javascript:alert(1)", "https://chat.example"))
         assertFalse(ClientPolicy.sameOrigin(null, "https://chat.example"))
     }
+    @Test fun sameServiceEntryRequiresTheCanonicalConnectedOrigin() {
+        assertTrue(ClientPolicy.sameServiceEntry("https://chat.example", "https://CHAT.example:443"))
+        assertTrue(ClientPolicy.sameServiceEntry("http://chat.example:3000/", "http://chat.example:3000"))
+        assertFalse(ClientPolicy.sameServiceEntry("https://chat.example/chat", "https://chat.example"))
+        assertFalse(ClientPolicy.sameServiceEntry("https://chat.example?next=/", "https://chat.example"))
+        assertFalse(ClientPolicy.sameServiceEntry("https://user:pass@chat.example", "https://chat.example"))
+        assertFalse(ClientPolicy.sameServiceEntry("javascript:alert(1)", "https://chat.example"))
+    }
     @Test fun chineseIsSelectedOnlyForChineseSystemLanguage() {
         assertTrue(ClientPolicy.chinese("zh")); assertTrue(ClientPolicy.chinese("ZH"))
         assertFalse(ClientPolicy.chinese("en")); assertFalse(ClientPolicy.chinese("fr"))

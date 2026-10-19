@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{self, File},
     io::Write,
     path::PathBuf,
@@ -14,6 +15,7 @@ use uuid::Uuid;
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECTION_FILE: &str = "connection.json";
+const CONNECTION_HISTORY_LIMIT: usize = 5;
 
 #[derive(Clone)]
 pub struct ConnectionManager(Arc<Mutex<ConnectionRuntime>>);
@@ -22,6 +24,7 @@ pub struct ConnectionManager(Arc<Mutex<ConnectionRuntime>>);
 struct ConnectionRuntime {
     candidate: Option<Url>,
     last_success: Option<Url>,
+    recent_urls: Vec<Url>,
     generation: u64,
     ready_nonce: Option<String>,
     session_token: Option<String>,
@@ -48,7 +51,10 @@ pub struct ConnectionStatus {
 
 #[derive(Deserialize, Serialize)]
 struct PersistedConnection {
+    #[serde(default)]
     last_success_url: String,
+    #[serde(default)]
+    recent_urls: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -67,8 +73,11 @@ enum PageLoadAction {
 
 impl ConnectionManager {
     pub fn load(app: &AppHandle) -> Self {
-        let last_success = load_last_success(app);
-        Self(Arc::new(Mutex::new(ConnectionRuntime::new(last_success))))
+        let (last_success, recent_urls) = load_connection_history(app);
+        Self(Arc::new(Mutex::new(ConnectionRuntime::with_recent(
+            last_success,
+            recent_urls,
+        ))))
     }
 
     /// Read-only: unlike status(), never consumes startup auto-connect.
@@ -93,6 +102,17 @@ impl ConnectionManager {
             state.last_success.as_ref().map(origin_string),
             state.error.as_ref().map(|_| "connectionFailed".into()),
         )
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn native_recent_urls(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .expect("connection state poisoned")
+            .recent_urls
+            .iter()
+            .map(origin_string)
+            .collect()
     }
 
     pub(crate) fn fail_attempt(&self, generation: u64, error: String) {
@@ -130,20 +150,22 @@ impl ConnectionManager {
         persist: F,
     ) -> Result<String, String>
     where
-        F: FnOnce(&Url) -> Result<(), String>,
+        F: FnOnce(&Url, &[Url]) -> Result<(), String>,
     {
         let mut state = self
             .0
             .lock()
             .map_err(|_| "Connection state is unavailable.")?;
         let candidate = state.validate_ready(generation, nonce, current_origin)?;
-        if let Err(error) = persist(&candidate) {
+        let recent_urls = remember_recent_url(&state.recent_urls, &candidate);
+        if let Err(error) = persist(&candidate, &recent_urls) {
             state.error = Some(error.clone());
             state.ready_nonce = None;
             state.session_token = None;
             return Err(error);
         }
         state.last_success = Some(candidate);
+        state.recent_urls = recent_urls;
         state.ready_nonce = None;
         state.ready = true;
         state.error = None;
@@ -210,8 +232,14 @@ pub fn return_to_settings(app: &AppHandle, manager: &ConnectionManager) {
 
 impl ConnectionRuntime {
     fn new(last_success: Option<Url>) -> Self {
+        let recent_urls = last_success.iter().cloned().collect();
+        Self::with_recent(last_success, recent_urls)
+    }
+
+    fn with_recent(last_success: Option<Url>, recent_urls: Vec<Url>) -> Self {
         Self {
             candidate: None,
+            recent_urls: remember_recent_urls(&recent_urls, last_success.as_ref()),
             last_success,
             generation: 0,
             ready_nonce: None,
@@ -388,13 +416,63 @@ fn connection_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("Could not locate app settings: {error}"))
 }
 
-fn load_last_success(app: &AppHandle) -> Option<Url> {
-    let file = connection_path(app).ok()?;
-    let saved: PersistedConnection = serde_json::from_slice(&fs::read(file).ok()?).ok()?;
-    validate_service_url(&saved.last_success_url).ok()
+fn load_connection_history(app: &AppHandle) -> (Option<Url>, Vec<Url>) {
+    let file = match connection_path(app) {
+        Ok(file) => file,
+        Err(_) => return (None, Vec::new()),
+    };
+    let saved = match fs::read(file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<PersistedConnection>(&bytes).ok())
+    {
+        Some(saved) => saved,
+        None => return (None, Vec::new()),
+    };
+    history_from_persisted(saved)
 }
 
-fn persist_last_success(app: &AppHandle, url: &Url) -> Result<(), String> {
+fn history_from_persisted(saved: PersistedConnection) -> (Option<Url>, Vec<Url>) {
+    let mut candidates = saved
+        .recent_urls
+        .into_iter()
+        .filter_map(|value| validate_service_url(&value).ok())
+        .collect::<Vec<_>>();
+    let last_success = validate_service_url(&saved.last_success_url).ok();
+    if let Some(current) = last_success.as_ref() {
+        candidates.push(current.clone());
+    }
+    let recent_urls = remember_recent_urls(&candidates, last_success.as_ref());
+    let last_success = last_success.or_else(|| recent_urls.first().cloned());
+    (last_success, recent_urls)
+}
+
+fn remember_recent_url(current: &[Url], candidate: &Url) -> Vec<Url> {
+    let mut candidates = Vec::with_capacity(current.len() + 1);
+    candidates.push(candidate.clone());
+    candidates.extend(current.iter().cloned());
+    remember_recent_urls(&candidates, Some(candidate))
+}
+
+fn remember_recent_urls(current: &[Url], preferred: Option<&Url>) -> Vec<Url> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::with_capacity(CONNECTION_HISTORY_LIMIT);
+    for url in preferred.into_iter().chain(current.iter()) {
+        let origin = origin_string(url);
+        if seen.insert(origin) {
+            result.push(url.clone());
+            if result.len() == CONNECTION_HISTORY_LIMIT {
+                break;
+            }
+        }
+    }
+    result
+}
+
+fn persist_connection_history(
+    app: &AppHandle,
+    url: &Url,
+    recent_urls: &[Url],
+) -> Result<(), String> {
     let file = connection_path(app)?;
     let parent = file
         .parent()
@@ -403,6 +481,7 @@ fn persist_last_success(app: &AppHandle, url: &Url) -> Result<(), String> {
     let temp = parent.join(format!(".connection-{}.tmp", Uuid::new_v4()));
     let contents = serde_json::to_vec(&PersistedConnection {
         last_success_url: origin_string(url),
+        recent_urls: recent_urls.iter().map(origin_string).collect(),
     })
     .map_err(|error| format!("Could not save connection: {error}"))?;
     let write_result = (|| {
@@ -468,7 +547,7 @@ pub async fn connect_service(
     address: String,
 ) -> Result<(), String> {
     ensure_local_webview(&webview)?;
-    start_connection(app, webview, manager.inner().clone(), address)
+    start_connection(app, webview, manager.inner().clone(), address).await
 }
 
 pub(crate) fn publish_native_state(app: &AppHandle) {
@@ -478,7 +557,7 @@ pub(crate) fn publish_native_state(app: &AppHandle) {
     let _ = app;
 }
 
-pub(crate) fn start_connection(
+pub(crate) async fn start_connection(
     app: AppHandle,
     webview: Webview,
     manager: ConnectionManager,
@@ -487,6 +566,21 @@ pub(crate) fn start_connection(
     let url = validate_service_url(&address)?;
     let attempt = manager.begin(url.clone());
     crate::save::invalidate_transfers(&app);
+    #[cfg(target_os = "android")]
+    {
+        let bridge = app
+            .state::<tauri_plugin_connection_controls::ConnectionControlsBridge<tauri::Wry>>()
+            .inner()
+            .clone();
+        if let Err(error) = bridge
+            .prepare_bundled_frontend(origin_string(&url), attempt.generation)
+            .await
+        {
+            manager.fail_attempt(attempt.generation, error.clone());
+            publish_native_state(&app);
+            return Err(error);
+        }
+    }
     let origin_pattern = format!("{}/*", origin_string(&url));
     let capability = CapabilityBuilder::new(format!("remote-session-{}", attempt.generation))
         .window("main")
@@ -542,9 +636,12 @@ pub async fn connection_ready(
     }
     let current = webview.url().map_err(|error| error.to_string())?;
     let current_origin = current.origin().ascii_serialization();
-    let token = match manager.complete_ready(generation, &nonce, &current_origin, |url| {
-        persist_last_success(&app, url)
-    }) {
+    let token = match manager.complete_ready(
+        generation,
+        &nonce,
+        &current_origin,
+        |url, recent_urls| persist_connection_history(&app, url, recent_urls),
+    ) {
         Ok(token) => token,
         Err(error) => {
             publish_native_state(&app);
@@ -899,7 +996,7 @@ mod tests {
                     first.generation,
                     &first.nonce,
                     "http://example.org:3000",
-                    |_| {
+                    |_, _| {
                         writes += 1;
                         Ok(())
                     }
@@ -915,7 +1012,7 @@ mod tests {
                     second.generation,
                     &first.nonce,
                     "https://chat.example.org",
-                    |_| {
+                    |_, _| {
                         writes += 1;
                         Ok(())
                     }
@@ -929,8 +1026,12 @@ mod tests {
                     second.generation,
                     &second.nonce,
                     "https://chat.example.org",
-                    |saved| {
+                    |saved, recent| {
                         assert_eq!(origin_string(saved), "https://chat.example.org");
+                        assert_eq!(
+                            recent.iter().map(origin_string).collect::<Vec<_>>(),
+                            vec!["https://chat.example.org"]
+                        );
                         writes += 1;
                         Ok(())
                     }
@@ -944,7 +1045,7 @@ mod tests {
                     second.generation,
                     &second.nonce,
                     "https://chat.example.org",
-                    |_| Ok(())
+                    |_, _| Ok(())
                 )
                 .is_err()
         );
@@ -971,7 +1072,7 @@ mod tests {
             attempt.generation,
             &attempt.nonce,
             "http://new.example.org:8080",
-            |_| Err("disk full".into()),
+            |_, _| Err("disk full".into()),
         );
         assert!(persistence.is_err());
         assert!(
@@ -991,6 +1092,71 @@ mod tests {
                     "http://new.example.org:8080"
                 )
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn connection_history_is_bounded_deduplicated_and_migrates_legacy_files() {
+        let legacy = PersistedConnection {
+            last_success_url: "https://chat.example.org".into(),
+            recent_urls: Vec::new(),
+        };
+        let (last_success, recent_urls) = history_from_persisted(legacy);
+        assert_eq!(
+            last_success.as_ref().map(origin_string).as_deref(),
+            Some("https://chat.example.org")
+        );
+        assert_eq!(
+            recent_urls.iter().map(origin_string).collect::<Vec<_>>(),
+            vec!["https://chat.example.org"]
+        );
+        let partially_missing: PersistedConnection = serde_json::from_str(
+            r#"{"recent_urls":["https://recovered.example.org"]}"#,
+        )
+        .unwrap();
+        let (last_success, recent_urls) = history_from_persisted(partially_missing);
+        assert_eq!(
+            last_success.as_ref().map(origin_string).as_deref(),
+            Some("https://recovered.example.org")
+        );
+        assert_eq!(
+            recent_urls.iter().map(origin_string).collect::<Vec<_>>(),
+            vec!["https://recovered.example.org"]
+        );
+        let mixed = PersistedConnection {
+            last_success_url: "not a service origin".into(),
+            recent_urls: vec![
+                "https://valid.example.org".into(),
+                "https://user:secret@invalid.example.org".into(),
+                "https://valid.example.org".into(),
+            ],
+        };
+        let (last_success, recent_urls) = history_from_persisted(mixed);
+        assert_eq!(
+            last_success.as_ref().map(origin_string).as_deref(),
+            Some("https://valid.example.org")
+        );
+        assert_eq!(recent_urls.len(), 1);
+
+        let values = (1..=7)
+            .map(|index| format!("https://{index}.example.org"))
+            .collect::<Vec<_>>();
+        let mut recent_urls = values[..5]
+            .iter()
+            .filter_map(|value| validate_service_url(value).ok())
+            .collect::<Vec<_>>();
+        recent_urls.insert(2, url("https://2.example.org"));
+        let normalized = remember_recent_urls(&recent_urls, Some(&url("https://5.example.org")));
+        assert_eq!(normalized.len(), CONNECTION_HISTORY_LIMIT);
+        assert_eq!(
+            normalized.iter().map(origin_string).collect::<Vec<_>>(),
+            vec![
+                "https://5.example.org",
+                "https://1.example.org",
+                "https://2.example.org",
+                "https://3.example.org",
+                "https://4.example.org"
+            ]
         );
     }
 

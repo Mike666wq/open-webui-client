@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "pretauri": "node scripts/generate-client-config.mjs && node scripts/prepare-assets.mjs",
-    "prebuild": "node scripts/generate-client-config.mjs && node scripts/prepare-assets.mjs",
+    "prebuild": "node scripts/generate-client-config.mjs && node scripts/prepare-assets.mjs && node scripts/prepare-bundled-frontend.mjs --if-android",
     "tauri": "tauri",
     "build": "vite build",
-    "test": "node --test",
+    "test": "node --test scripts src/app.test.js",
     "version:check": "node scripts/manage-version.mjs check",
-    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort"
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "frontend:prepare": "node scripts/prepare-bundled-frontend.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3"

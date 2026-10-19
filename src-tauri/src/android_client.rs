@@ -69,12 +69,12 @@ pub(crate) fn install(app: &AppHandle) {
                                         == Some(url.origin().ascii_serialization().as_str()) => {}
                             Ok(_) => {
                                 if let Some(window) = app.get_webview_window("main") {
-                                    if connection::start_connection(
+                                    if tauri::async_runtime::block_on(connection::start_connection(
                                         app.clone(),
                                         window.as_ref().clone(),
                                         manager.inner().clone(),
                                         address,
-                                    )
+                                    ))
                                     .is_err()
                                     {
                                         error_code = Some("connectionFailed".into());
@@ -117,6 +117,7 @@ pub(crate) fn install(app: &AppHandle) {
             }
             let (generation, phase, candidate_url, last_success_url, failure) =
                 manager.native_snapshot();
+            let recent_urls = manager.native_recent_urls();
             revision = revision.wrapping_add(1);
             let _ =
                 tauri::async_runtime::block_on(bridge.render_connection_state(NativeClientState {
@@ -126,6 +127,7 @@ pub(crate) fn install(app: &AppHandle) {
                     phase,
                     candidate_url,
                     last_success_url,
+                    recent_urls,
                     error_code: error_code.or(failure),
                 }));
         }

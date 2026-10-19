@@ -1,6 +1,7 @@
 package local.openwebui.connectioncontrols
 
 import android.app.Activity
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Point
 import android.graphics.Canvas
@@ -27,6 +28,7 @@ import android.webkit.WebView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -55,6 +57,7 @@ internal class ClientStateArgs {
     var phase: String = "settings"
     var candidateUrl: String? = null
     var lastSuccessUrl: String? = null
+    var recentUrls: List<String> = emptyList()
     var errorCode: String? = null
 }
 
@@ -65,31 +68,39 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private val title = TextView(activity)
     private val subtitle = TextView(activity)
     private val button = ImageButton(activity)
-    private val directoryButton = ImageButton(activity)
-    private var personalization: PersonalizationController? = null
     private var channel: Channel? = null
     private var state = ClientStateArgs()
-    private var menu: AlertDialog? = null
-    private var settings: AlertDialog? = null
+    private var connectionOverlay: FrameLayout? = null
+    private var connectionScroll: ScrollView? = null
+    private var connectionCard: LinearLayout? = null
+    private var connectionImage: ImageView? = null
+    private var connectionScrim: View? = null
+    private var connectionTitle: TextView? = null
+    private var connectionSubtitle: TextView? = null
+    private var connectionClose: TextView? = null
+    private var recentContainer: LinearLayout? = null
+    private var recentLabel: TextView? = null
+    private var reloadButton: Button? = null
+    private var exportButton: Button? = null
     private var confirmation: AlertDialog? = null
     private var address: EditText? = null
     private var status: TextView? = null
     private var connect: Button? = null
-    private var previous: Button? = null
     private var attempted = false
+    private var hidePanelWhenConnected = false
     private var disposed = false
     private var clearHistoryGeneration = -1L
     private var lastInsets: WindowInsetsCompat? = null
-    private val toolbarHeight get() = max(dp(48), title.lineHeight + subtitle.lineHeight + dp(8))
+    private val toolbarHeight get() = max(dp(52), title.lineHeight + subtitle.lineHeight + dp(10))
     private var night: Boolean? = null
     private var fontScale = 0f
-    private val dark get() = personalization?.darkOverride ?: (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
-    private val surface get() = personalization?.surfaceColor ?: Color.parseColor(if (dark) "#111318" else "#F8FAFC")
+    private val dark get() = (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    private val surface get() = Color.parseColor(if (dark) "#111318" else "#F8FAFC")
     private val foreground get() = Color.parseColor(if (dark) "#E5E7EB" else "#111827")
     private val secondary get() = Color.parseColor(if (dark) "#A6AFBD" else "#596579")
-    private val accent get() = personalization?.accentOverride ?: Color.parseColor(if (dark) "#93B4FF" else "#2563EB")
+    private val accent get() = Color.parseColor(if (dark) "#93B4FF" else "#2563EB")
     private val fieldSurface get() = Color.parseColor(if (dark) "#20242C" else "#EDF1F7")
-    private val radius get() = personalization?.cornerRadius ?: 20
+    private val radius = 20
     private val chinese get() = ClientPolicy.chinese(activity.resources.configuration.locales[0].language)
     private fun tr(en: String, zh: String) = if (chinese) zh else en
     private fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
@@ -128,14 +139,11 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         button.background = android.graphics.drawable.RippleDrawable(
             ColorStateList.valueOf(Color.argb(40, 100, 130, 190)), null,
             GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(surface) })
-        directoryButton.contentDescription = tr("Conversation directory", "对话目录")
-        directoryButton.setPadding(dp(12),dp(12),dp(12),dp(12))
-        directoryButton.visibility = View.GONE
-        directoryButton.setOnClickListener { personalization?.showDirectory() }
-        toolbar.addView(directoryButton, LinearLayout.LayoutParams(dp(48),dp(48)))
         toolbar.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)))
         root.addView(toolbar, FrameLayout.LayoutParams(-1, toolbarHeight, Gravity.TOP))
-        button.setOnClickListener { showMenu() }
+        button.setOnClickListener { showConnectionPanel(autoHideOnConnect = state.phase != "connected") }
+        ensureConnectionPanel()
+        if (state.phase != "connected") showConnectionPanel(autoHideOnConnect = true)
         updateTheme(force = true)
         updateToolbar()
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -145,11 +153,10 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         root.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
         root.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
         root.addOnLayoutChangeListener { _, l, t, r, b, oldL, oldT, oldR, oldB ->
-            if (r-l != oldR-oldL || b-t != oldB-oldT) listOfNotNull(menu, settings, confirmation).forEach { styleDialog(it) }
+            if (r-l != oldR-oldL || b-t != oldB-oldT) listOfNotNull(confirmation).forEach { styleDialog(it) }
         }
-        personalization = PersonalizationController(activity, webView, ::builder, { dialog ->
-            dialog.window?.let { immersive(it) }; styleDialog(dialog)
-        }, { updateTheme(force = true) }, { enabled -> directoryButton.visibility = if (enabled) View.VISIBLE else View.GONE })
+        // Establish the unmodified bundled official UI first. Legacy appearance
+        // files remain on disk but no DOM adapter, wallpaper or directory runs.
         root.post { immersive(activity.window); ViewCompat.requestApplyInsets(root) }
     }
 
@@ -185,6 +192,14 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         val bottom = max(cutout.bottom, overlap).coerceAtMost(root.height - top)
         if (root.paddingLeft != left || root.paddingTop != safeTop || root.paddingRight != right || root.paddingBottom != bottom) {
             root.setPadding(left, safeTop, right, bottom)
+        }
+        connectionScroll?.layoutParams?.let { params ->
+            val available = (root.height - safeTop - bottom).coerceAtLeast(dp(240))
+            val desired = minOf(dp(720), (available * .9f).toInt())
+            if (params.height != desired) {
+                params.height = desired
+                connectionScroll?.layoutParams = params
+            }
         }
         val params = webView.layoutParams
         val width = (root.width - left - right).coerceAtLeast(1)
@@ -259,17 +274,35 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         night = dark; fontScale = scale
         title.textSize = 14f; subtitle.textSize = 11f
         toolbar.layoutParams?.let { if (it.height != toolbarHeight) { it.height = toolbarHeight; toolbar.layoutParams = it } }
-        toolbar.setBackgroundColor(surface)
+        toolbar.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            if (dark) intArrayOf(0xF4181B22.toInt(), 0xF2111318.toInt())
+            else intArrayOf(0xFAFFFFFF.toInt(), 0xF5F1F5F9.toInt())
+        ).apply {
+            setStroke(dp(1), Color.argb(if (dark) 44 else 76, 255, 255, 255))
+        }
         title.setTextColor(foreground); subtitle.setTextColor(secondary)
         button.setImageDrawable(Glyph("settings", foreground))
-        directoryButton.setImageDrawable(Glyph("directory", foreground))
+        button.background = android.graphics.drawable.RippleDrawable(
+            ColorStateList.valueOf(Color.argb(if (dark) 48 else 34, 96, 128, 176)),
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.argb(if (dark) 52 else 28, 255, 255, 255))
+                setStroke(dp(1), Color.argb(if (dark) 48 else 34, 148, 163, 184))
+            },
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.argb(28, 96, 128, 176))
+            }
+        )
         activity.window.statusBarColor = surface
         activity.window.navigationBarColor = surface
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
         controller.isAppearanceLightNavigationBars = !dark
         controller.isAppearanceLightStatusBars = !dark
-        listOfNotNull(menu, settings, confirmation).forEach { styleDialog(it) }
-        personalization?.restyleDialogs()
+        listOfNotNull(confirmation).forEach { styleDialog(it) }
+        styleConnectionPanel()
+        if (connectionOverlay?.visibility == View.VISIBLE) updateConnectionPanel()
     }
 
     private fun builder() = AlertDialog.Builder(ContextThemeWrapper(activity,
@@ -342,50 +375,197 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         if (disposed || next.revision <= state.revision || next.generation < state.generation) return
         val old = state
         state = next
-        personalization?.connection(if (next.phase == "connected") next.candidateUrl ?: next.lastSuccessUrl else null, next.generation)
         updateToolbar()
         if (next.phase == "connected" && clearHistoryGeneration != next.generation) {
             clearHistoryGeneration = next.generation
             webView.clearHistory() // Do not retain local startup or the previous server.
         }
-        if (next.phase == "connected" && next.errorCode == null && attempted) {
-            attempted = false; settings?.dismiss(); confirmation?.dismiss()
+        if (next.phase == "connected" && next.errorCode == null && hidePanelWhenConnected) {
+            attempted = false
+            confirmation?.dismiss()
+            hideConnectionPanel()
         }
-        if (next.phase == "failed" && (old.phase == "connecting" || attempted)) showSettings()
-        status?.text = when {
-            next.errorCode == "invalidAddress" -> tr("Enter an HTTP(S) server origin, without credentials or a path.", "请输入 HTTP(S) 服务地址，不含账号密码或子路径。")
-            next.errorCode != null -> tr("Connection failed. Retry or reopen the previous server.", "连接失败，请重试或重新打开上次成功的服务。")
-            next.phase == "connecting" -> tr("Connecting…", "正在连接…")
-            else -> ""
-        }
-        connect?.isEnabled = channel != null && next.phase != "connecting"
-        previous?.visibility = if (next.lastSuccessUrl != null && next.phase == "failed") View.VISIBLE else View.GONE
+        if (next.phase == "failed" && (old.phase == "connecting" || attempted)) showConnectionPanel()
+        if (next.phase != "connected") showConnectionPanel(autoHideOnConnect = true)
+        updateConnectionPanel()
     }
 
-    private fun showMenu() {
-        if (menu?.isShowing == true || disposed) return
-        val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(16), dp(20), dp(16)) }
-        val heading = TextView(activity).apply { text = tr("Client settings", "客户端设置"); textSize = 20f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, dp(12)) }
-        content.addView(heading)
-        val labels = arrayOf(tr("Server address", "修改服务地址"), tr("Reload", "重新加载"), tr("Export Android diagnostics", "导出安卓诊断"), tr("Appearance & reading", "外观与阅读"))
-        val icons = arrayOf("server", "reload", "export", "settings")
-        labels.forEachIndexed { index, label ->
-            val row = Button(activity).apply {
-                tag = icons[index]; text = label; isAllCaps = false; textSize = 16f; gravity = Gravity.CENTER_VERTICAL or Gravity.START
-                setPadding(dp(12), 0, dp(12), 0); minHeight = dp(56)
-                background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(Color.argb(30,100,130,190)), GradientDrawable().apply { setColor(surface); cornerRadius = dp(radius).toFloat() }, null)
-                setCompoundDrawablesRelative(Glyph(icons[index], secondary).apply { setBounds(0,0,dp(22),dp(22)) }, null, null, null)
-                compoundDrawablePadding = dp(14)
-                setOnClickListener {
-                    menu?.dismiss()
-                    when (index) { 0 -> showSettings(); 1 -> confirmLeaving { send("reload") }; 2 -> send("exportDiagnostics"); 3 -> personalization?.showAppearance() }
-                }
-            }
-            content.addView(row, LinearLayout.LayoutParams(-1, -2))
+    private fun ensureConnectionPanel() {
+        if (connectionOverlay != null || disposed) return
+        val overlay = FrameLayout(activity).apply {
+            visibility = View.GONE
+            isClickable = true
+            contentDescription = tr("Server connection", "服务器连接")
         }
-        menu = builder().setView(ScrollView(activity).apply { addView(content) }).create().also { dialog ->
-            dialog.setOnDismissListener { menu = null }
-            showImmersive(dialog)
+        connectionImage = ImageView(activity).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            alpha = .92f
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFFB7CBE6.toInt(), 0xFFE5DCC4.toInt())
+            )
+            val bitmap = sequenceOf(
+                "connection-welcome.webp",
+                "bundled-frontend/assets/welcome.webp"
+            ).firstNotNullOfOrNull { asset ->
+                runCatching {
+                    activity.assets.open(asset).use { BitmapFactory.decodeStream(it) }
+                }.getOrNull()
+            }
+            if (bitmap != null) setImageBitmap(bitmap)
+        }
+        overlay.addView(connectionImage, FrameLayout.LayoutParams(-1, -1))
+        connectionScrim = View(activity)
+        overlay.addView(connectionScrim, FrameLayout.LayoutParams(-1, -1))
+
+        val card = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            elevation = dp(12).toFloat()
+            setPadding(dp(22), dp(20), dp(22), dp(20))
+        }
+        connectionCard = card
+        val brand = TextView(activity).apply {
+            text = "OPEN WEBUI  ·  ANDROID"
+            textSize = 10.5f
+            letterSpacing = .12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        card.addView(brand, LinearLayout.LayoutParams(-1, -2))
+        val header = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        val heading = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        connectionTitle = TextView(activity).apply {
+            textSize = 27f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        connectionSubtitle = TextView(activity).apply {
+            textSize = 13f
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(0, dp(4), 0, 0)
+        }
+        heading.addView(connectionTitle)
+        heading.addView(connectionSubtitle)
+        header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+        connectionClose = TextView(activity).apply {
+            text = "×"
+            textSize = 26f
+            gravity = Gravity.CENTER
+            minWidth = dp(48); minHeight = dp(48)
+            contentDescription = tr("Close connection settings", "关闭连接设置")
+            setOnClickListener { closeConnectionPanel() }
+        }
+        header.addView(connectionClose, LinearLayout.LayoutParams(dp(48), dp(48)))
+        card.addView(header, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+
+        val addressLabel = TextView(activity).apply {
+            text = tr("Server address", "服务地址")
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        card.addView(addressLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
+        address = EditText(activity).apply {
+            isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            hint = "https://chat.example.com"
+            contentDescription = tr("Server address", "服务地址")
+            textSize = 16f
+            minHeight = dp(52)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        card.addView(address, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        status = TextView(activity).apply {
+            textSize = 12.5f
+            setPadding(0, dp(8), 0, dp(2))
+            visibility = View.GONE
+        }
+        card.addView(status, LinearLayout.LayoutParams(-1, -2))
+        connect = Button(activity).apply {
+            text = tr("Connect securely", "安全连接")
+            isAllCaps = false
+            textSize = 15f
+            minHeight = dp(50)
+            setOnClickListener { connectFromInput() }
+        }
+        card.addView(connect, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+
+        recentLabel = TextView(activity).apply {
+            text = tr("Recent servers", "最近服务")
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(18), 0, dp(6))
+        }
+        card.addView(recentLabel, LinearLayout.LayoutParams(-1, -2))
+        recentContainer = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        card.addView(recentContainer, LinearLayout.LayoutParams(-1, -2))
+
+        val actions = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        reloadButton = utilityButton(tr("Reload", "重新加载"), "reload") {
+            confirmLeaving { send("reload") }
+        }
+        exportButton = utilityButton(tr("Export diagnostics", "导出诊断"), "export") {
+            send("exportDiagnostics")
+        }
+        actions.addView(reloadButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
+        actions.addView(exportButton, LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
+
+        val scroll = ScrollView(activity).apply {
+            isFillViewport = true
+            addView(card, ViewGroup.LayoutParams(-1, -2))
+        }
+        connectionScroll = scroll
+        overlay.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(8)
+        })
+        root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        connectionOverlay = overlay
+        styleConnectionPanel()
+    }
+
+    private fun utilityButton(label: String, kind: String, action: () -> Unit) = Button(activity).apply {
+        text = label; isAllCaps = false; textSize = 13f; minHeight = dp(46)
+        setCompoundDrawablesRelative(
+            Glyph(kind, secondary).apply { setBounds(0, 0, dp(18), dp(18)) },
+            null, null, null
+        )
+        compoundDrawablePadding = dp(8)
+        setOnClickListener { action() }
+    }
+
+    private fun showConnectionPanel(autoHideOnConnect: Boolean = false) {
+        if (disposed) return
+        ensureConnectionPanel()
+        val overlay = connectionOverlay ?: return
+        hidePanelWhenConnected = hidePanelWhenConnected || autoHideOnConnect
+        if (overlay.visibility != View.VISIBLE) {
+            address?.setText(state.candidateUrl ?: state.lastSuccessUrl ?: "")
+            overlay.visibility = View.VISIBLE
+        }
+        overlay.bringToFront()
+        updateConnectionPanel()
+    }
+
+    private fun hideConnectionPanel() {
+        if (state.phase == "connected") {
+            connectionOverlay?.visibility = View.GONE
+            hidePanelWhenConnected = false
+        }
+    }
+
+    private fun closeConnectionPanel() {
+        if (state.phase == "connected") {
+            hideConnectionPanel()
+        } else {
+            cancelIfConnecting()
         }
     }
 
@@ -403,58 +583,136 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             .create().also { dialog -> dialog.setOnDismissListener { confirmation = null }; showImmersive(dialog) }
     }
 
-    private fun showSettings() {
-        if (disposed || settings?.isShowing == true) return
-        val layout = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        address = EditText(activity).apply {
-            isSingleLine = true
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-            contentDescription = tr("Server address", "服务地址")
-            setText(state.candidateUrl ?: state.lastSuccessUrl ?: "")
-            selectAll()
-            textSize = 16f; minHeight = dp(52); setPadding(dp(8), dp(8), dp(8), dp(8))
+    private fun connectFromInput() {
+        val value = address?.text?.toString()?.trim() ?: ""
+        if (isSameServiceAddress(value)) {
+            hideConnectionPanel()
+        } else if (state.phase == "connected") {
+            confirmLeaving { start(value) }
+        } else {
+            start(value)
         }
-        status = TextView(activity).apply { setPadding(0, dp(8), 0, dp(8)) }
-        previous = Button(activity).apply {
-            text = tr("Reopen previous server", "重新打开上次服务")
-            visibility = if (state.lastSuccessUrl != null && state.phase == "failed") View.VISIBLE else View.GONE
-            setOnClickListener { state.lastSuccessUrl?.let { start(it) } }
+    }
+
+    private fun isSameServiceAddress(value: String): Boolean =
+        state.phase == "connected" && ClientPolicy.sameServiceEntry(value, state.candidateUrl)
+
+    private fun updateConnectionPanel() {
+        if (disposed || connectionOverlay == null) return
+        val connected = state.phase == "connected"
+        connectionTitle?.text = if (connected) tr("Connection settings", "连接设置") else tr("Connect to Open WebUI", "连接 Open WebUI")
+        connectionSubtitle?.text = if (connected) {
+            ClientPolicy.serviceLabel(state.candidateUrl)
+        } else {
+            tr("Your server address and login stay on this device.", "服务地址与登录状态只保存在本机。")
         }
-        layout.addView(address); layout.addView(status); layout.addView(previous)
-        val dialog = builder()
-            .setTitle(tr("Connection settings", "连接设置"))
-            .setView(ScrollView(activity).apply { addView(layout) })
-            .setNegativeButton(tr("Cancel", "取消")) { _, _ -> cancelIfConnecting() }
-            .setPositiveButton(tr("Connect", "连接"), null)
-            .create()
-        settings = dialog
-        dialog.setOnDismissListener { settings = null; address = null; status = null; connect = null; previous = null }
-        dialog.setOnShowListener {
-            dialog.window?.let { window ->
-                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                immersive(window)
-            }
-            connect = dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                isEnabled = channel != null && state.phase != "connecting"
+        connectionClose?.visibility = if (connected) View.VISIBLE else View.INVISIBLE
+        val currentAddress = state.candidateUrl ?: state.lastSuccessUrl
+        if (address != null && !address!!.hasFocus()) {
+            val nextAddress = currentAddress ?: ""
+            if (address!!.text?.toString() != nextAddress) address!!.setText(nextAddress)
+        }
+        status?.text = when {
+            state.errorCode == "invalidAddress" -> tr("Enter an HTTP(S) origin without a path, credentials, query or fragment.", "请输入不含路径、账号密码、查询参数或锚点的 HTTP(S) 服务地址。")
+            state.errorCode != null -> tr("Connection failed. Retry or reopen a recent server.", "连接失败，请重试或重新打开最近服务。")
+            state.phase == "connecting" -> tr("Connecting…", "正在连接…")
+            else -> ""
+        }
+        status?.visibility = if (status?.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        connect?.text = when {
+            state.phase == "connecting" -> tr("Connecting…", "正在连接…")
+            connected -> tr("Switch server", "切换服务")
+            else -> tr("Connect securely", "安全连接")
+        }
+        connect?.isEnabled = channel != null && state.phase != "connecting"
+        reloadButton?.visibility = if (connected) View.VISIBLE else View.GONE
+        exportButton?.visibility = if (connected) View.VISIBLE else View.GONE
+        reloadButton?.isEnabled = state.phase == "connected" && channel != null
+        exportButton?.isEnabled = state.phase == "connected" && channel != null
+        rebuildRecentServices()
+        styleConnectionPanel()
+    }
+
+    private fun rebuildRecentServices() {
+        val list = recentContainer ?: return
+        list.removeAllViews()
+        val values = state.recentUrls
+        recentLabel?.visibility = if (values.isEmpty()) View.GONE else View.VISIBLE
+        values.forEach { value ->
+            val active = ClientPolicy.sameOrigin(value, state.candidateUrl)
+            val row = Button(activity).apply {
+                text = ClientPolicy.serviceLabel(value) + if (active) {
+                    "\n" + tr("Current server", "当前服务")
+                } else {
+                    "\n" + tr("Tap to switch", "点击切换")
+                }
+                isAllCaps = false
+                textSize = 14f
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                minHeight = dp(58)
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                isEnabled = state.phase != "connecting" && !active
+                setTextColor(foreground)
+                setLineSpacing(0f, 1.15f)
+                background = android.graphics.drawable.RippleDrawable(
+                    ColorStateList.valueOf(Color.argb(32, 96, 128, 176)),
+                    GradientDrawable().apply {
+                        setColor(fieldSurface)
+                        cornerRadius = dp(16).toFloat()
+                        setStroke(dp(1), Color.argb(if (dark) 40 else 70, 255, 255, 255))
+                    },
+                    null
+                )
                 setOnClickListener {
-                    val value = address?.text?.toString()?.trim() ?: ""
-                    if (state.phase == "connected" && ClientPolicy.sameOrigin(value, state.candidateUrl) &&
-                        runCatching { val uri = java.net.URI(value); uri.path.isNullOrEmpty() || uri.path == "/" }.getOrDefault(false) &&
-                        !value.contains('?') && !value.contains('#')) {
-                        dialog.dismiss()
-                    } else if (state.phase == "connected") confirmLeaving { start(value) }
-                    else start(value)
+                    if (state.phase == "connected") confirmLeaving { start(value) } else start(value)
                 }
             }
-            styleDialog(dialog)
-            if (state.phase == "failed") status?.text = tr("Connection failed. Retry or reopen the previous server.", "连接失败，请重试或重新打开上次成功的服务。")
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
         }
-        dialog.setOnCancelListener { cancelIfConnecting() }
-        dialog.show()
+    }
+
+    private fun styleConnectionPanel() {
+        val card = connectionCard ?: return
+        connectionImage?.alpha = if (dark) .5f else .88f
+        connectionScrim?.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            if (dark) intArrayOf(0xD9080D15.toInt(), 0xF4121822.toInt(), 0xFF111318.toInt())
+            else intArrayOf(0x08101820, 0xA8E7EEF4.toInt(), 0xFFF8FAFC.toInt())
+        )
+        card.background = GradientDrawable().apply {
+            setColor(Color.argb(if (dark) 238 else 244, Color.red(surface), Color.green(surface), Color.blue(surface)))
+            cornerRadii = floatArrayOf(
+                dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(),
+                dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat()
+            )
+            setStroke(dp(1), Color.argb(if (dark) 40 else 100, 255, 255, 255))
+        }
+        connectionTitle?.setTextColor(foreground)
+        connectionSubtitle?.setTextColor(secondary)
+        connectionClose?.setTextColor(secondary)
+        address?.apply {
+            setTextColor(foreground); setHintTextColor(Color.argb(150, Color.red(secondary), Color.green(secondary), Color.blue(secondary)))
+            background = GradientDrawable().apply {
+                setColor(fieldSurface); cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.argb(if (dark) 64 else 42, Color.red(accent), Color.green(accent), Color.blue(accent)))
+            }
+        }
+        status?.setTextColor(secondary)
+        connect?.apply {
+            setTextColor(if (Color.luminance(accent) > .45f) Color.parseColor("#111827") else Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(accent)
+            background = GradientDrawable().apply { setColor(accent); cornerRadius = dp(16).toFloat() }
+        }
+        reloadButton?.setTextColor(secondary)
+        exportButton?.setTextColor(secondary)
+        reloadButton?.background = GradientDrawable().apply { setColor(fieldSurface); cornerRadius = dp(14).toFloat() }
+        exportButton?.background = GradientDrawable().apply { setColor(fieldSurface); cornerRadius = dp(14).toFloat() }
+        recentLabel?.setTextColor(secondary)
     }
 
     private fun start(value: String) {
         attempted = true
+        hidePanelWhenConnected = true
         status?.text = tr("Connecting…", "正在连接…")
         connect?.isEnabled = false
         send("connect", value)
@@ -467,10 +725,16 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         if (insets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
             WindowCompat.getInsetsController(activity.window, root).hide(WindowInsetsCompat.Type.ime()); return
         }
-        if (personalization?.dismissTop() == true) return
         if (confirmation?.isShowing == true) { confirmation?.dismiss(); return }
-        if (settings?.isShowing == true) { cancelIfConnecting(); settings?.dismiss(); return }
-        if (menu?.isShowing == true) { menu?.dismiss(); return }
+        if (connectionOverlay?.visibility == View.VISIBLE) {
+            if (state.phase == "connected") {
+                hideConnectionPanel()
+            } else {
+                cancelIfConnecting()
+                activity.moveTaskToBack(true)
+            }
+            return
+        }
         if (state.phase == "connecting") { send("cancel"); return }
         val history = webView.copyBackForwardList()
         val previousUrl = if (history.currentIndex > 0) history.getItemAtIndex(history.currentIndex - 1)?.url else null
@@ -488,16 +752,31 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show()
     }
 
-    fun resume() { if (!disposed) { personalization?.resume(); updateTheme(); immersive(activity.window); ViewCompat.requestApplyInsets(root) } }
+    fun resume() { if (!disposed) { updateTheme(); immersive(activity.window); ViewCompat.requestApplyInsets(root) } }
     fun destroy() {
         disposed = true
-        personalization?.destroy(); personalization = null
-        confirmation?.dismiss(); settings?.dismiss(); menu?.dismiss()
+        confirmation?.dismiss()
         channel = null
         root.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
         root.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
         ViewCompat.setOnApplyWindowInsetsListener(root, null)
         button.setOnClickListener(null)
+        (connectionOverlay?.parent as? ViewGroup)?.removeView(connectionOverlay)
+        connectionOverlay = null
+        connectionScroll = null
+        connectionCard = null
+        connectionImage = null
+        connectionScrim = null
+        connectionTitle = null
+        connectionSubtitle = null
+        connectionClose = null
+        recentContainer = null
+        recentLabel = null
+        reloadButton = null
+        exportButton = null
+        address = null
+        status = null
+        connect = null
         (root.parent as? ViewGroup)?.removeView(root)
     }
 }
