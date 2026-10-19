@@ -50,10 +50,11 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /and local_image\s+and apply is not None/s);
   assert.match(script, /content-desc.*Wallpaper preview|Wallpaper preview/s);
   assert.match(script, /appearance_enabled/);
-  assert.match(script, /def verify_wallpaper_layers/);
-  assert.match(script, /wallpaper-layer-contract-passed/);
-  assert.match(script, /messages_background/);
-  assert.match(script, /readable control surfaces/);
+  assert.match(script, /def screenshot_wallpaper_metrics/);
+  assert.match(script, /wallpaper-visible-contract-passed/);
+  assert.match(script, /wallpaper_saturation/);
+  assert.match(script, /saturation < 0\.20/);
+  assert.doesNotMatch(script, /OWC-LAYERS/);
   assert.match(script, /install_reported_config/);
   assert.match(script, /haslib\.sha256|hashlib\.sha256/);
   assert.match(script, /node\.get\("text", ""\) == "Appearance & reading"/);
