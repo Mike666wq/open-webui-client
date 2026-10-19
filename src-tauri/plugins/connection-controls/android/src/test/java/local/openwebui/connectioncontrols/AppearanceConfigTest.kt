@@ -8,7 +8,10 @@ class AppearanceConfigTest {
     @Test fun readableWallpaperStartsUnobscured() {
         val value=AppearanceConfig()
         assertEquals(0,value.dim)
-        assertEquals(90,value.opacity)
+        assertEquals(50,value.opacity)
+        assertEquals(18,value.glassBlur)
+        assertEquals(20,value.radius)
+        assertEquals("auto",value.codeTone)
     }
     @Test fun originsAreIsolatedAndCanonical() {
         assertEquals("https://chat.example", AppearanceConfig.origin("HTTPS://CHAT.example:443/c/123"))
@@ -18,8 +21,19 @@ class AppearanceConfigTest {
         assertNull(AppearanceConfig.origin("file:///tmp/test"))
         assertNull(AppearanceConfig.origin("https://chat.example:99999"))
     }
-    @Test fun unknownSchemaCannotOverwriteCurrentSettings() {
-        try { AppearanceConfig.parse(JSONObject("{schema:2}")); fail("Unknown schema accepted") } catch (_: IllegalArgumentException) {}
+    @Test fun schemaOneMigratesToMoreTransparentGlass() {
+        val legacy=JSONObject().put("schema",1).put("opacity",90)
+        val migrated=AppearanceConfig.parse(legacy)
+        assertEquals(90,migrated.opacity)
+        assertEquals(18,migrated.glassBlur)
+        assertEquals(20,migrated.radius)
+        assertEquals("auto",migrated.codeTone)
+        assertEquals(2,migrated.json().optInt("schema"))
+    }
+    @Test fun schemaTwoAcceptsCurrentSettingsAndRejectsUnknownSchema() {
+        val value=AppearanceConfig.parse(AppearanceConfig(enabled=true,glassBlur=24,radius=12,codeTone="glass").json())
+        assertTrue(value.enabled); assertEquals(24,value.glassBlur); assertEquals(12,value.radius); assertEquals("glass",value.codeTone)
+        try { AppearanceConfig.parse(JSONObject("{schema:3}")); fail("Unknown schema accepted") } catch (_: IllegalArgumentException) {}
     }
     @Test fun invalidInputCannotBecomeFilePathsOrCss() {
         val value=AppearanceConfig.parse(JSONObject().put("image","../../secret").put("accent","red;display:none").put("opacity",0).put("zoom",999).put("fontSize",999))

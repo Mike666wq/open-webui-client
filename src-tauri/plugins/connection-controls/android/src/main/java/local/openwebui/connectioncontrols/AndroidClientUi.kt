@@ -84,11 +84,12 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private var night: Boolean? = null
     private var fontScale = 0f
     private val dark get() = personalization?.darkOverride ?: (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
-    private val surface get() = Color.parseColor(if (dark) "#111318" else "#F8FAFC")
+    private val surface get() = personalization?.surfaceColor ?: Color.parseColor(if (dark) "#111318" else "#F8FAFC")
     private val foreground get() = Color.parseColor(if (dark) "#E5E7EB" else "#111827")
     private val secondary get() = Color.parseColor(if (dark) "#A6AFBD" else "#596579")
     private val accent get() = personalization?.accentOverride ?: Color.parseColor(if (dark) "#93B4FF" else "#2563EB")
     private val fieldSurface get() = Color.parseColor(if (dark) "#20242C" else "#EDF1F7")
+    private val radius get() = personalization?.cornerRadius ?: 20
     private val chinese get() = ClientPolicy.chinese(activity.resources.configuration.locales[0].language)
     private fun tr(en: String, zh: String) = if (chinese) zh else en
     private fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
@@ -126,7 +127,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         button.setPadding(dp(12), dp(12), dp(12), dp(12))
         button.background = android.graphics.drawable.RippleDrawable(
             ColorStateList.valueOf(Color.argb(40, 100, 130, 190)), null,
-            GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) })
+            GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(surface) })
         directoryButton.contentDescription = tr("Conversation directory", "对话目录")
         directoryButton.setPadding(dp(12),dp(12),dp(12),dp(12))
         directoryButton.visibility = View.GONE
@@ -277,7 +278,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private fun styleDialog(dialog: AlertDialog) {
         if (disposed || !dialog.isShowing) return
         val window = dialog.window ?: return
-        window.setBackgroundDrawable(GradientDrawable().apply { setColor(surface); cornerRadius = dp(24).toFloat() })
+        window.setBackgroundDrawable(GradientDrawable().apply { setColor(surface); cornerRadius = dp(radius).toFloat() })
         window.decorView.clipToOutline = true
         window.setGravity(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
         val displayWidth = activity.resources.displayMetrics.widthPixels
@@ -303,7 +304,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         address?.apply {
             setTextColor(this@AndroidClientUi.foreground); setHintTextColor(secondary)
             backgroundTintList = null
-            background = GradientDrawable().apply { setColor(fieldSurface); cornerRadius = dp(14).toFloat(); setStroke(dp(1), accent) }
+            background = GradientDrawable().apply { setColor(fieldSurface); cornerRadius = dp(radius).toFloat(); setStroke(dp(1), accent) }
         }
         status?.setTextColor(secondary)
         for (which in arrayOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE)) {
@@ -311,7 +312,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                 isAllCaps = false; minHeight = dp(48); setTextColor(accent)
                 if (which == AlertDialog.BUTTON_POSITIVE) {
                     setTextColor(if (Color.luminance(accent) > .35f) Color.parseColor("#111827") else Color.WHITE)
-                    background = GradientDrawable().apply { setColor(accent); cornerRadius = dp(12).toFloat() }
+                    background = GradientDrawable().apply { setColor(accent); cornerRadius = dp(radius).toFloat() }
                     setPadding(dp(18), 0, dp(18), 0)
                 }
             }
@@ -372,7 +373,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             val row = Button(activity).apply {
                 tag = icons[index]; text = label; isAllCaps = false; textSize = 16f; gravity = Gravity.CENTER_VERTICAL or Gravity.START
                 setPadding(dp(12), 0, dp(12), 0); minHeight = dp(56)
-                background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(Color.argb(30,100,130,190)), GradientDrawable().apply { setColor(surface); cornerRadius = dp(12).toFloat() }, null)
+                background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(Color.argb(30,100,130,190)), GradientDrawable().apply { setColor(surface); cornerRadius = dp(radius).toFloat() }, null)
                 setCompoundDrawablesRelative(Glyph(icons[index], secondary).apply { setBounds(0,0,dp(22),dp(22)) }, null, null, null)
                 compoundDrawablePadding = dp(14)
                 setOnClickListener {

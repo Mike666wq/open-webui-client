@@ -14,3 +14,5 @@ Inspected sources:
 For static browser review, serve a temporary copy on loopback; copy the Android asset as `adapter.js`, prefixed with `window.fixtureAdapter = `. Do not generate tracked assets. Browser visual checks are distinct from native-device validation.
 
 Glass surfaces combine a translucent tint, a highlight, a border and a shadow. CSS backdrop blur is progressive: the native wallpaper is a sibling of the WebView, so page CSS cannot blur that native image. The tint must keep replies readable independently of backdrop-filter support; the wallpaper stays in the native layer.
+
+For interactive parameter review, call `window.previewConfig({opacity, glassBlur, radius, codeTone})` in the browser console. This updates the fixture adapter without writing repository assets.

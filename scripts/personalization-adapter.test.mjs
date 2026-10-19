@@ -81,6 +81,23 @@ test('both themes protect reply text without stacking glass on nested input cont
     assert.match(css,/:not\(pre\) > code/);
   }
 });
+test('glass parameters map and clamp without CSS injection',()=>{
+  const f=fixture(); f.invoke({config:{enabled:true,dark:true,opacity:10,glassBlur:80,radius:100,codeTone:'glasses;}}body{display:none'}});
+  const css=f.styles.values().next().value.textContent;
+  assert.ok(css.includes('background-color:rgba(17,19,24,0.4)'));
+  assert.ok(css.includes('backdrop-filter:blur(30px) saturate(145%)'));
+  assert.ok(css.includes('border-radius:28px'));
+  assert.ok(!css.includes('body{display:none'));
+  f.invoke({config:{enabled:true,dark:true,opacity:50,glassBlur:0,radius:0,codeTone:'opaque'}});
+  const opaque=f.styles.values().next().value.textContent;
+  assert.ok(opaque.includes('border-radius:0px'));
+  assert.ok(opaque.includes('background:#20242c'));
+  f.invoke({config:{enabled:true,dark:true,opacity:80,glassBlur:24,radius:16,codeTone:'glass'}});
+  const glass=f.styles.values().next().value.textContent;
+  assert.ok(glass.includes('backdrop-filter:blur(24px) saturate(145%)'));
+  assert.ok(glass.includes('border-radius:16px'));
+  assert.ok(glass.includes('background:rgba(17,19,24,0.6)'));
+});
 test('new chat root keeps the glass shell before messages exist and after returning to a conversation',()=>{
   const f=fixture(); f.clearMessages(); f.location.pathname='/';
   const empty=f.invoke();
