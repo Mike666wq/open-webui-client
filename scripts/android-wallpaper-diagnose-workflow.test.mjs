@@ -54,6 +54,10 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /wallpaper-visible-contract-passed/);
   assert.match(script, /wallpaper_saturation/);
   assert.match(script, /saturation < 0\.20/);
+  assert.match(script, /new-chat-wallpaper-passed/);
+  assert.match(script, /restored-chat-wallpaper-passed/);
+  assert.match(script, /new_chat_saturation/);
+  assert.match(script, /restored_chat_saturation/);
   assert.doesNotMatch(script, /OWC-LAYERS/);
   assert.match(script, /install_reported_config/);
   assert.match(script, /haslib\.sha256|hashlib\.sha256/);

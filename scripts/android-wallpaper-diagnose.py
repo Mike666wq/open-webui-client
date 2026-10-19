@@ -150,6 +150,8 @@ class Fixture(BaseHTTPRequestHandler):
   * { box-sizing: border-box; }
   html { margin: 0; min-height: 100%; background: #e2eaf6; }
   body { margin: 0; min-height: 100%; background: #fff; color: #111827; }
+  .app { min-height: 100dvh; background: #fff; }
+  .app > div { min-height: 100dvh; background: #fff; }
   #app { min-height: 100dvh; background: #fff; }
   #app > main { display: contents; }
   #chat-container { background: #fff; }
@@ -165,14 +167,14 @@ class Fixture(BaseHTTPRequestHandler):
   #message-input-container { padding: 12px; background: rgba(255,255,255,.82); }
   #chat-input { width: 100%; min-height: 48px; border: 1px solid #64748b; border-radius: 12px; padding: 10px; }
 </style></head>
-<body><div id="app"><main><div id="chat-container"><div><div><div><div id="chat-pane">
+<body><div class="app"><div><div id="app"><main><div id="chat-container"><div><div><div><div id="chat-pane">
   <nav><strong id="fixture-header">Wallpaper fixture 8765</strong></nav>
   <div id="messages-container">
     <div class="user-message" id="message-wallpaper-1"><div class="rounded-3xl"><div class="markdown-prose">Verify the selected local wallpaper.</div></div></div>
     <div class="user-message" id="message-wallpaper-2"><div class="rounded-3xl"><div class="markdown-prose">The image should be visible through this transparent chat surface.</div></div></div>
   </div>
   <div id="message-input-container"><textarea id="chat-input" aria-label="Message">wallpaper diagnostic</textarea></div>
-</div></div></div></div></div></main></div>
+</div></div></div></div></div></main></div></div></div>
 <script>
 (() => {{
   const started = Date.now();
@@ -851,6 +853,24 @@ def main():
         marker.write_text(f"pixel-compare-passed:{normalized_difference:.6f}\n", encoding="utf-8")
         visual = screenshot_wallpaper_metrics(image, output)
         marker.write_text("wallpaper-visible-contract-passed\n", encoding="utf-8")
+
+        # Follow the reported path: conversation -> new chat -> another
+        # conversation. Use the service's own URL handling rather than an
+        # unreliable page-position tap.
+        shell("am start -a android.intent.action.VIEW -d http://127.0.0.1:8765/ local.openwebui.client")
+        marker.write_text("new-chat-opened\n", encoding="utf-8")
+        wait_for_web_page(output, timeout=30)
+        time.sleep(3)
+        new_chat = screenshot(output, "30-new-chat")
+        new_chat_metrics = screenshot_wallpaper_metrics(new_chat, output)
+        marker.write_text("new-chat-wallpaper-passed\n", encoding="utf-8")
+        shell("am start -a android.intent.action.VIEW -d http://127.0.0.1:8765/c/restored local.openwebui.client")
+        marker.write_text("restore-chat-opened\n", encoding="utf-8")
+        wait_for_web_page(output, timeout=30)
+        time.sleep(3)
+        restored = screenshot(output, "40-restored-chat")
+        restored_metrics = screenshot_wallpaper_metrics(restored, output)
+        marker.write_text("restored-chat-wallpaper-passed\n", encoding="utf-8")
         persisted = collect_persisted_config(output)
         write_fixture_evidence(output)
         result = {
@@ -859,6 +879,10 @@ def main():
             "image_rmse": normalized_difference,
             "wallpaper_saturation": visual["saturation"],
             "wallpaper_variance": visual["variance"],
+            "new_chat_saturation": new_chat_metrics["saturation"],
+            "new_chat_variance": new_chat_metrics["variance"],
+            "restored_chat_saturation": restored_metrics["saturation"],
+            "restored_chat_variance": restored_metrics["variance"],
             "persisted_background": persisted.get("background"),
             "persisted_image": persisted.get("image"),
         }
@@ -867,8 +891,9 @@ def main():
         )
         (output / "result.txt").write_text(
             "PASS: imported a local PNG through the Android system picker, "
-            "applied it, proved a vivid visible page-area change in the Android "
-            "frame, and read the persisted image-backed appearance config.\n",
+            "applied it, proved a vivid visible page-area change on conversation, "
+            "new-chat and restored pages in the Android frame, and read the "
+            "persisted image-backed appearance config.\n",
             encoding="utf-8",
         )
         print("ANDROID_WALLPAPER_DIAGNOSE_PASS")
