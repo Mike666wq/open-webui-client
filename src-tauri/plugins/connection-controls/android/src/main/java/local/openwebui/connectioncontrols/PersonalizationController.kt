@@ -68,6 +68,12 @@ internal class PersonalizationController(
     val current get()=draft ?: saved
     val darkOverride: Boolean? get()=if (!current.enabled || origin==null) null else when(current.mode) { "dark" -> true; "light" -> false; else -> null }
     val accentOverride: Int? get()=if(current.enabled && origin!=null) Color.parseColor(current.accent) else null
+    val cornerRadius: Int get()=current.radius
+    val surfaceColor: Int
+        get() {
+            val alpha=current.opacity*255/100
+            return if(current.enabled) Color.argb(alpha,if(dark) 17 else 248,if(dark) 19 else 250,if(dark) 24 else 252) else Color.argb(255,if(dark) 17 else 248,if(dark) 19 else 250,if(dark) 24 else 252)
+        }
     private val dark get()=darkOverride ?: (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
     private val zh get()=ClientPolicy.chinese(activity.resources.configuration.locales[0].language)
     private fun tr(en: String, cn: String)=if(zh) cn else en
@@ -293,6 +299,7 @@ internal class PersonalizationController(
                 })
             })
         }
+        fun heading(value: String) { content.addView(TextView(activity).apply { text=value; textSize=16f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(0,dp(18),0,dp(4)) }) }
         appearanceSwitch=toggle("Enable appearance","启用外观定制",current.enabled) { draft=current.copy(enabled=it) }
         toggle("Conversation directory","启用对话目录",current.navigation) { draft=current.copy(navigation=it) }
         choice(tr("Palette","配色预设"),listOf(tr("Native blue","原生蓝"),tr("Sage","青灰"),tr("Warm sand","暖砂"),tr("Opaque reading","不透明阅读")),listOf("blue","sage","sand","reading").indexOf(current.preset)) {
@@ -312,7 +319,7 @@ internal class PersonalizationController(
             clipToOutline=true
             outlineProvider=object:ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0,0,view.width,view.height,dp(16).toFloat())
+                    outline.setRoundRect(0,0,view.width,view.height,dp(current.radius).toFloat())
                 }
             }
             visibility=View.GONE
@@ -337,13 +344,19 @@ internal class PersonalizationController(
             override fun onTextChanged(s: CharSequence?,start: Int,before: Int,count: Int) { if(Regex("#[0-9a-fA-F]{6}").matches(s.toString())) { draft=current.copy(accent=s.toString()); preview() } }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
+        heading(tr("Background","背景"))
         slider(tr("Vertical crop position","裁切垂直位置"),current.position,0,100) { draft=current.copy(position=it) }
         slider(tr("Crop zoom (%)","裁切缩放（%）"),current.zoom,100,200) { draft=current.copy(zoom=it) }
         slider(tr("Scrim (%)","遮罩（%）"),current.dim,0,80) { draft=current.copy(dim=it) }
         slider(tr("Static blur","静态模糊"),current.blur,0,20) { draft=current.copy(blur=it) }
-        slider(tr("Panel opacity (%)","面板不透明度（%）"),current.opacity,50,100) { draft=current.copy(opacity=it) }
+        heading(tr("Glass & components","玻璃与组件"))
+        slider(tr("Panel opacity (%)","面板不透明度（%）"),current.opacity,40,100) { draft=current.copy(opacity=it) }
+        slider(tr("Glass blur","玻璃模糊"),current.glassBlur,0,30) { draft=current.copy(glassBlur=it) }
+        slider(tr("Corner radius","全局圆角"),current.radius,0,28) { draft=current.copy(radius=it) }
+        heading(tr("Reading & code","阅读与代码"))
         slider(tr("Chat text size","聊天正文字号"),current.fontSize,14,24) { draft=current.copy(fontSize=it) }
         slider(tr("Line height (%)","行距（%）"),current.lineHeight,130,210) { draft=current.copy(lineHeight=it) }
+        choice(tr("Code blocks","代码块背景"),listOf(tr("Automatic","自动"),tr("Glass","玻璃"),tr("Opaque","不透明")),listOf("auto","glass","opaque").indexOf(current.codeTone)) { draft=current.copy(codeTone=listOf("auto","glass","opaque")[it]) }
         editorStatus=TextView(activity).also { it.setPadding(0,dp(12),0,0); content.addView(it) }
         content.addView(Button(activity).apply { text=tr("Restore defaults","恢复默认"); isAllCaps=false; minHeight=dp(48); setOnClickListener { draft=AppearanceConfig(); preview(); rebuildEditor() } })
         val dialog=builder().setTitle(tr("Appearance & reading","外观与阅读"))

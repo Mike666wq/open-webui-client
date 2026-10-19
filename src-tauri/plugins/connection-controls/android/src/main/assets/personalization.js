@@ -41,12 +41,23 @@
     const text = dark ? '#e5e7eb' : '#111827';
     const muted = dark ? '#a6afbd' : '#596579';
     const surface = dark ? '17,19,24' : '248,250,252';
-    const alpha = clamp(c.opacity, 50, 100, 90) / 100;
+    const alpha = clamp(c.opacity, 40, 100, 50) / 100;
+    const glassBlur = clamp(c.glassBlur, 0, 30, 18);
+    const radius = clamp(c.radius, 0, 28, 20);
+    const codeTone = ['auto', 'glass', 'opaque'].includes(c.codeTone) ? c.codeTone : 'auto';
     const accent = /^#[0-9a-f]{6}$/i.test(c.accent) ? c.accent : '#2563eb';
     const rgb = parseInt(accent.slice(1), 16);
     const luminance = [16,8,0].map(shift => ((rgb >> shift) & 255)/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4);
     const ink = luminance[0]*.2126+luminance[1]*.7152+luminance[2]*.0722 > .2 ? '#111827' : '#ffffff';
     const scope = `html[${marker}]`;
+    const codeBackground = codeTone === 'glass'
+      ? `background:rgba(${surface},${Math.round(Math.max(.20, alpha * .75) * 1000) / 1000})!important; border:1px solid ${dark ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.42)'}!important; box-shadow:0 6px 18px ${dark ? 'rgba(0,0,0,.14)' : 'rgba(15,23,42,.06)'}!important;`
+      : codeTone === 'opaque'
+        ? `background:${dark ? '#20242c' : '#edf1f7'}!important;`
+        : `background:${dark ? '#20242c' : '#edf1f7'}!important;`;
+    const inlineCodeBackground = codeTone === 'glass'
+      ? `background:rgba(${surface},${Math.round(Math.max(.20, alpha * .75) * 1000) / 1000})!important; border:1px solid ${dark ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.48)'}!important;`
+      : `background:${dark ? '#303743' : '#e2e8f0'}!important;`;
     const css = `
 ${scope}, ${scope} body { background:transparent!important; color:${text}!important; color-scheme:${dark ? 'dark' : 'light'}; }
 ${scope} [${surfaceMarker}], ${scope} :is(.app, .app > div, #chat-container, #chat-container > div, #chat-pane, #message-input-dropzone) { background-color:transparent!important; background-image:none!important; }
@@ -60,18 +71,18 @@ ${scope} #chat-container { color:${text}!important; --color-gray-50:${dark ? '#2
 ${scope} #chat-container :is(nav, #message-input-container, .user-message .rounded-3xl, .chat-assistant), ${scope} #sidebar {
   background-color:rgba(${surface},${alpha})!important;
   background-image:linear-gradient(${dark ? 'rgba(0,0,0,.24)' : 'rgba(255,255,255,.38)'},${dark ? 'rgba(0,0,0,.10)' : 'rgba(255,255,255,.24)'})!important;
-  -webkit-backdrop-filter:blur(18px) saturate(145%)!important;
-  backdrop-filter:blur(18px) saturate(145%)!important;
+  -webkit-backdrop-filter:blur(${glassBlur}px) saturate(145%)!important;
+  backdrop-filter:blur(${glassBlur}px) saturate(145%)!important;
   border:1px solid ${dark ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.58)'}!important;
   box-shadow:0 8px 28px ${dark ? 'rgba(0,0,0,.20)' : 'rgba(15,23,42,.10)'}!important;
   color:${text}!important;
 }
-${scope} #chat-container .chat-assistant { box-sizing:border-box; border-radius:20px; padding:14px 16px; margin-block:8px; }
+${scope} #chat-container .chat-assistant { box-sizing:border-box; border-radius:${radius}px; padding:14px 16px; margin-block:8px; }
 ${scope} #chat-container :is(#chat-input-container,.ProseMirror,textarea) { background-color:transparent!important; background-image:none!important; }
 ${scope} #chat-container :is(.markdown-prose,.whitespace-pre-wrap) { color:${text}!important; font-size:${clamp(c.fontSize,14,24,16)}px!important; line-height:${clamp(c.lineHeight,130,210,165)/100}!important; }
 ${scope} #chat-container :is(pre,code) { font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important; line-height:1.5!important; }
-${scope} #chat-container pre { background:${dark ? '#20242c' : '#edf1f7'}!important; color:${text}!important; }
-${scope} #chat-container :not(pre) > code { background:${dark ? '#303743' : '#e2e8f0'}!important; color:${text}!important; }
+${scope} #chat-container pre { ${codeBackground}; color:${text}!important; border-radius:${radius}px; }
+${scope} #chat-container :not(pre) > code { ${inlineCodeBackground}; color:${text}!important; border-radius:${Math.min(radius,8)}px; }
 ${scope} #chat-container :is(a,button[aria-pressed="true"]) { color:${accent}!important; }
 ${scope} #chat-container :is(.text-gray-500,.text-gray-400) { color:${muted}!important; }
 ${scope} #chat-container :is(.text-gray-100,.text-gray-200,.text-gray-700,.text-gray-800,.text-gray-900,.text-black) { color:${text}!important; }

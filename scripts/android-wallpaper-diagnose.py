@@ -43,6 +43,9 @@ REPORTED_CONFIG = {
     "dim": 0,
     "blur": 0,
     "opacity": 90,
+    "glassBlur": 18,
+    "radius": 20,
+    "codeTone": "auto",
     "fontSize": 16,
     "lineHeight": 165,
 }
@@ -686,6 +689,8 @@ def collect_persisted_config(output):
         r"wallpaper-[a-f0-9-]+\.jpg", parsed.get("image", "")
     ) or parsed.get("enabled") is not True:
         raise DiagnosisFailure(f"Unexpected persisted appearance config: {parsed}")
+    if parsed.get("schema") != 2 or parsed.get("opacity") != 40:
+        raise DiagnosisFailure(f"Appearance config was not migrated to schema 2: {parsed}")
     return parsed
 
 

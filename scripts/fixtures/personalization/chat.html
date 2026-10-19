@@ -66,8 +66,9 @@ console.log(greeting);</code></pre>
   <script src="adapter.js"></script>
   <script>
     // Structural hooks only; this fixture does not embed upstream UI code.
+    history.replaceState(null,'','/c/preview');
     let snapshot;
-    let config = {enabled:true,dark:false,accent:'#437c78',opacity:70,fontSize:18,lineHeight:175};
+    let config = {enabled:true,dark:false,accent:'#437c78',opacity:50,glassBlur:18,radius:20,codeTone:'auto',fontSize:18,lineHeight:175};
     const messagesMarkup = document.getElementById('messages-container').outerHTML;
     function refresh() {
       snapshot = window.fixtureAdapter({origin:location.origin,navigation:true,config});
@@ -103,6 +104,7 @@ console.log(greeting);</code></pre>
       refresh();
     }
     preview(false);
+    window.previewConfig = next => { config = {...config,...next}; return refresh(); };
   </script>
 </body>
 </html>

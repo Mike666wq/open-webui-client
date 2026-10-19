@@ -7,6 +7,7 @@ on:
       - codex/android-wallpaper-diagnose
       - codex/android-wallpaper-preview-fix
       - codex/android-glass-new-chat
+      - codex/android-glass-controls
     paths:
       - .github/workflows/android-wallpaper-diagnose.yml
       - scripts/android-wallpaper-diagnose.py
