@@ -40,7 +40,7 @@ REPORTED_CONFIG = {
     "image": "",
     "position": 50,
     "zoom": 100,
-    "dim": 30,
+    "dim": 0,
     "blur": 0,
     "opacity": 90,
     "fontSize": 16,
@@ -180,6 +180,17 @@ class Fixture(BaseHTTPRequestHandler):
   function report() {{
     const tauri = window.__TAURI__;
     const core = tauri && tauri.core;
+    const paint = id => {{
+      const node = document.getElementById(id);
+      if (!node) return null;
+      const style = getComputedStyle(node);
+      return {{
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage
+      }};
+    }};
+    const bubble = document.querySelector('.user-message .rounded-3xl');
+    const bubbleStyle = bubble && getComputedStyle(bubble);
     const details = {{
       elapsedMs: Date.now() - started,
       reports: ++reports,
@@ -187,7 +198,15 @@ class Fixture(BaseHTTPRequestHandler):
       href: location.href,
       tauriType: typeof tauri,
       coreType: typeof core,
-      invokeType: typeof (core && core.invoke)
+      invokeType: typeof (core && core.invoke),
+      appearanceEnabled: document.documentElement.hasAttribute('data-owc-appearance'),
+      messages: paint('messages-container'),
+      navigation: paint('fixture-header'),
+      input: paint('message-input-container'),
+      bubble: bubbleStyle ? {{
+        backgroundColor: bubbleStyle.backgroundColor,
+        backgroundImage: bubbleStyle.backgroundImage
+      }} : null
     }};
     fetch('/__fixture_state', {{
       method: 'POST',
@@ -198,7 +217,7 @@ class Fixture(BaseHTTPRequestHandler):
   }}
   report();
   const timer = setInterval(report, 500);
-  setTimeout(() => clearInterval(timer), 25000);
+  setTimeout(() => clearInterval(timer), 120000);
 }})();
 </script></body></html>"""
         self.send_response(200)
@@ -434,17 +453,18 @@ def select_wallpaper(output):
             for value in (node.get("text", ""), node.get("content-desc", ""))
             if value
         ).casefold()
-        # A chooser may auto-return after one tap. Wait until the appearance
-        # sheet is interactable again; the caller then verifies the imported
-        # image state and checks for an explicit import failure.
-        if (
-            "appearance & reading" in text
-            and "choose image" in text
-            and "apply" in text
+        # ACTION_OPEN_DOCUMENT normally returns after one tap. Backward
+        # navigation and the scroll position vary by DocumentsUI release, so
+        # detect the restored native sheet itself. The caller verifies the
+        # asynchronous import result and any explicit failure message.
+        application_nodes = [
+            node for node in nodes if node.get("package", "") == PACKAGE
+        ]
+        if any(
+            node.get("text", "") == "Appearance & reading"
+            for node in application_nodes
         ):
-            apply = find(output, "Apply", timeout=2, exact=True)
-            if apply.get("enabled", "true") == "true":
-                return
+            return
         current = {
             (node.get("text", ""), node.get("content-desc", ""), node.get("bounds", ""))
             for node in nodes
@@ -592,6 +612,69 @@ def image_compare(before, after, output):
             f"Image wallpaper produced insufficient visual change: RMSE={normalized:.4f}"
         )
     return normalized
+
+
+def verify_wallpaper_layers(output):
+    with FIXTURE_LOCK:
+        events = list(FIXTURE_EVENTS)
+    states = [
+        event
+        for event in events
+        if event.get("kind") == "page-state"
+        and event.get("appearanceEnabled") is True
+        and isinstance(event.get("messages"), dict)
+        and isinstance(event.get("navigation"), dict)
+        and isinstance(event.get("input"), dict)
+        and isinstance(event.get("bubble"), dict)
+    ]
+    if not states:
+        raise DiagnosisFailure(
+            "The page reported no computed wallpaper layers after appearance was enabled"
+        )
+    state = states[-1]
+    try:
+        messages_alpha = float(
+            re.fullmatch(
+                r"rgba\(0,\s*0,\s*0,\s*([0-9.]+)\)",
+                state["messages"]["backgroundColor"],
+            ).group(1)
+        )
+        navigation_alpha = float(
+            re.fullmatch(
+                r"rgba\(248,\s*250,\s*252,\s*([0-9.]+)\)",
+                state["navigation"]["backgroundColor"],
+            ).group(1)
+        )
+        input_alpha = float(
+            re.fullmatch(
+                r"rgba\(248,\s*250,\s*252,\s*([0-9.]+)\)",
+                state["input"]["backgroundColor"],
+            ).group(1)
+        )
+        bubble_alpha = float(
+            re.fullmatch(
+                r"rgba\(248,\s*250,\s*252,\s*([0-9.]+)\)",
+                state["bubble"]["backgroundColor"],
+            ).group(1)
+        )
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise DiagnosisFailure(
+            f"Unexpected computed wallpaper layers: {state}"
+        ) from error
+    if messages_alpha > 0.01:
+        raise DiagnosisFailure(
+            f"The wallpaper was obscured by a messages-container surface: {state['messages']}"
+        )
+    for name, alpha in (
+        ("navigation", navigation_alpha),
+        ("input", input_alpha),
+        ("message bubble", bubble_alpha),
+    ):
+        if not 0.45 <= alpha <= 1.0:
+            raise DiagnosisFailure(
+                f"The {name} surface lost readable contrast: alpha={alpha}"
+            )
+    return state
 
 
 def capture_device_state(output):
@@ -776,12 +859,18 @@ def main():
 
         normalized_difference = image_compare(gradient, image, output)
         marker.write_text(f"pixel-compare-passed:{normalized_difference:.6f}\n", encoding="utf-8")
+        layers = verify_wallpaper_layers(output)
+        marker.write_text("wallpaper-layer-contract-passed\n", encoding="utf-8")
         persisted = collect_persisted_config(output)
         write_fixture_evidence(output)
         result = {
             "status": "passed",
             "source_sha": args.source_sha,
             "image_rmse": normalized_difference,
+            "messages_background": layers["messages"]["backgroundColor"],
+            "navigation_background": layers["navigation"]["backgroundColor"],
+            "input_background": layers["input"]["backgroundColor"],
+            "bubble_background": layers["bubble"]["backgroundColor"],
             "persisted_background": persisted.get("background"),
             "persisted_image": persisted.get("image"),
         }
@@ -790,8 +879,9 @@ def main():
         )
         (output / "result.txt").write_text(
             "PASS: imported a local PNG through the Android system picker, "
-            "applied it, proved a visible page-area pixel change, and read the "
-            "persisted image-backed appearance config.\n",
+            "applied it, proved a visible page-area pixel change, verified the "
+            "chat body stayed transparent with readable control surfaces, and "
+            "read the persisted image-backed appearance config.\n",
             encoding="utf-8",
         )
         print("ANDROID_WALLPAPER_DIAGNOSE_PASS")

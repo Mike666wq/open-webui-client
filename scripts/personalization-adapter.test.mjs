@@ -53,6 +53,18 @@ function fixture() {
 test('supported page styles apply idempotently and removal restores host attributes',()=>{
   const f=fixture(); assert.equal(f.invoke().supported,true); f.invoke(); assert.equal(f.styles.size,1);
   assert.ok(f.styles.values().next().value.textContent.includes('monospace'));
+  assert.match(
+    f.styles.values().next().value.textContent,
+    /#chat-container :is\(nav, #message-input, #message-input-container/,
+  );
+  assert.match(
+    f.styles.values().next().value.textContent,
+    /#messages-container \{ background-color:transparent!important; background-image:none!important; \}/,
+  );
+  assert.doesNotMatch(
+    f.styles.values().next().value.textContent,
+    /#messages-container,\s*html\[[^\n]+backgroundColor:rgba/,
+  );
   assert.deepEqual([...f.surfaces.keys()].sort(),['chat','opaque-inner']);
   f.invoke({config:{enabled:false}}); assert.equal(f.styles.size,0); assert.equal(f.attributes.size,0); assert.equal(f.surfaces.size,0);
 });
