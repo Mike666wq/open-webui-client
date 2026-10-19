@@ -96,7 +96,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private var fontScale = 0f
     private val dark get() = (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     private val surface get() = Color.parseColor(if (dark) "#111318" else "#F8FAFC")
-    private val foreground get() = Color.parseColor(if (dark) "#E5E7EB" else "#111827")
+    private val foregroundColor get() = Color.parseColor(if (dark) "#E5E7EB" else "#111827")
     private val secondary get() = Color.parseColor(if (dark) "#A6AFBD" else "#596579")
     private val accent get() = Color.parseColor(if (dark) "#93B4FF" else "#2563EB")
     private val fieldSurface get() = Color.parseColor(if (dark) "#20242C" else "#EDF1F7")
@@ -281,8 +281,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         ).apply {
             setStroke(dp(1), Color.argb(if (dark) 44 else 76, 255, 255, 255))
         }
-        title.setTextColor(foreground); subtitle.setTextColor(secondary)
-        button.setImageDrawable(Glyph("settings", foreground))
+        title.setTextColor(foregroundColor); subtitle.setTextColor(secondary)
+        button.setImageDrawable(Glyph("settings", foregroundColor))
         button.background = android.graphics.drawable.RippleDrawable(
             ColorStateList.valueOf(Color.argb(if (dark) 48 else 34, 96, 128, 176)),
             GradientDrawable().apply {
@@ -320,10 +320,10 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         window.attributes = window.attributes.apply { y = safeBottom + dp(12); dimAmount = .35f }
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.decorView.minimumHeight = dp(100)
-        dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.setTextColor(foreground)
+        dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.setTextColor(foregroundColor)
         dialog.findViewById<TextView>(android.R.id.message)?.setTextColor(secondary)
         fun recolor(view: View) {
-            if (view is TextView) view.setTextColor(if (view is Button) accent else foreground)
+            if (view is TextView) view.setTextColor(if (view is Button) accent else foregroundColor)
             if (view is Button && view.tag is String) {
                 view.backgroundTintList = ColorStateList.valueOf(surface)
                 view.setCompoundDrawablesRelative(Glyph(view.tag as String, secondary).apply { setBounds(0,0,dp(22),dp(22)) }, null, null, null)
@@ -335,7 +335,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
         recolor(window.decorView)
         address?.apply {
-            setTextColor(this@AndroidClientUi.foreground); setHintTextColor(secondary)
+            setTextColor(foregroundColor); setHintTextColor(secondary)
             backgroundTintList = null
             background = GradientDrawable().apply { setColor(fieldSurface); cornerRadius = dp(radius).toFloat(); setStroke(dp(1), accent) }
         }
@@ -652,7 +652,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                 minHeight = dp(58)
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 isEnabled = state.phase != "connecting" && !active
-                setTextColor(foreground)
+                setTextColor(foregroundColor)
                 setLineSpacing(0f, 1.15f)
                 background = android.graphics.drawable.RippleDrawable(
                     ColorStateList.valueOf(Color.argb(32, 96, 128, 176)),
@@ -687,11 +687,11 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             )
             setStroke(dp(1), Color.argb(if (dark) 40 else 100, 255, 255, 255))
         }
-        connectionTitle?.setTextColor(foreground)
+        connectionTitle?.setTextColor(foregroundColor)
         connectionSubtitle?.setTextColor(secondary)
         connectionClose?.setTextColor(secondary)
         address?.apply {
-            setTextColor(foreground); setHintTextColor(Color.argb(150, Color.red(secondary), Color.green(secondary), Color.blue(secondary)))
+            setTextColor(foregroundColor); setHintTextColor(Color.argb(150, Color.red(secondary), Color.green(secondary), Color.blue(secondary)))
             background = GradientDrawable().apply {
                 setColor(fieldSurface); cornerRadius = dp(16).toFloat()
                 setStroke(dp(1), Color.argb(if (dark) 64 else 42, Color.red(accent), Color.green(accent), Color.blue(accent)))
