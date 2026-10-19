@@ -151,10 +151,7 @@ impl<R: Runtime> ConnectionControlsBridge<R> {
             generation: u64,
         }
         self.handle
-            .run_mobile_plugin_async::<()>(
-                "prepareBundledFrontend",
-                Args { origin, generation },
-            )
+            .run_mobile_plugin_async::<()>("prepareBundledFrontend", Args { origin, generation })
             .await
             .map_err(|error| error.to_string())
     }

@@ -636,21 +636,19 @@ pub async fn connection_ready(
     }
     let current = webview.url().map_err(|error| error.to_string())?;
     let current_origin = current.origin().ascii_serialization();
-    let token = match manager.complete_ready(
-        generation,
-        &nonce,
-        &current_origin,
-        |url, recent_urls| persist_connection_history(&app, url, recent_urls),
-    ) {
-        Ok(token) => token,
-        Err(error) => {
-            publish_native_state(&app);
-            if manager.should_return_after_ready_error(generation, &current_origin) {
-                let _ = webview.navigate(settings_url());
+    let token =
+        match manager.complete_ready(generation, &nonce, &current_origin, |url, recent_urls| {
+            persist_connection_history(&app, url, recent_urls)
+        }) {
+            Ok(token) => token,
+            Err(error) => {
+                publish_native_state(&app);
+                if manager.should_return_after_ready_error(generation, &current_origin) {
+                    let _ = webview.navigate(settings_url());
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-    };
+        };
     publish_native_state(&app);
     let injection = format!(
         "window.__OWC_SESSION__={{generation:{generation},token:{}}};",
@@ -1110,10 +1108,8 @@ mod tests {
             recent_urls.iter().map(origin_string).collect::<Vec<_>>(),
             vec!["https://chat.example.org"]
         );
-        let partially_missing: PersistedConnection = serde_json::from_str(
-            r#"{"recent_urls":["https://recovered.example.org"]}"#,
-        )
-        .unwrap();
+        let partially_missing: PersistedConnection =
+            serde_json::from_str(r#"{"recent_urls":["https://recovered.example.org"]}"#).unwrap();
         let (last_success, recent_urls) = history_from_persisted(partially_missing);
         assert_eq!(
             last_success.as_ref().map(origin_string).as_deref(),
