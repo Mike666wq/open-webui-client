@@ -5,6 +5,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppearanceConfigTest {
+    @Test fun readableWallpaperStartsUnobscured() {
+        val value=AppearanceConfig()
+        assertEquals(0,value.dim)
+        assertEquals(90,value.opacity)
+    }
     @Test fun originsAreIsolatedAndCanonical() {
         assertEquals("https://chat.example", AppearanceConfig.origin("HTTPS://CHAT.example:443/c/123"))
         assertEquals("http://chat.example:3000", AppearanceConfig.origin("http://chat.example:3000"))

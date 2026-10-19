@@ -649,7 +649,7 @@ pub fn on_page_load<R: Runtime>(webview: &Webview<R>, url: &Url) {
             let origin = serde_json::to_string(&expected_origin).expect("origin string serializes");
             let nonce = serde_json::to_string(&nonce).expect("nonce serializes");
             format!(
-                "(async()=>{{try{{if(location.origin!=={origin})return;const r=await fetch('/api/config',{{credentials:'omit',cache:'no-store',redirect:'error'}});if(!r.ok)return;const d=await r.json();if(!d||d.status!==true)return;await window.__TAURI__.core.invoke('connection-ready',{{generation:{generation},nonce:{nonce}}});}}catch{{}}}})();"
+                "(async()=>{{if(location.origin!=={origin})return;const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));let core;for(let attempt=0;attempt<60;attempt++){{core=window.__TAURI__?.core;if(typeof core?.invoke==='function')break;await sleep(250);}}if(typeof core?.invoke!=='function'){{console.warn('OWC connection bridge unavailable');return;}}try{{const r=await fetch('/api/config',{{credentials:'omit',cache:'no-store',redirect:'error'}});if(!r.ok){{console.warn('OWC readiness check rejected',r.status);return;}}const d=await r.json();if(!d||d.status!==true){{console.warn('OWC readiness check failed');return;}}await core.invoke('connection-ready',{{generation:{generation},nonce:{nonce}}});}}catch(error){{console.warn('OWC connection readiness failed',error);}}}})();"
             )
         }
         PageLoadAction::RestoreSession {

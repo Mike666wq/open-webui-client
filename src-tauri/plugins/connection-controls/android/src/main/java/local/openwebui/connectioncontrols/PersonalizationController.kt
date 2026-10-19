@@ -5,11 +5,13 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.webkit.WebView
 import android.widget.*
 import androidx.activity.ComponentActivity
@@ -50,6 +52,9 @@ internal class PersonalizationController(
     private var directoryRows: LinearLayout?=null
     private var directorySearch: EditText?=null
     private var editorStatus: TextView?=null
+    private var previewImage: ImageView?=null
+    private var appearanceSwitch: androidx.appcompat.widget.SwitchCompat?=null
+    private var backgroundSpinner: Spinner?=null
     private var pendingImport=false
     private var editorSession=0L
     private var pickerSession=-1L
@@ -81,7 +86,14 @@ internal class PersonalizationController(
                     if(disposed || pin!=editorSession || draft==null) imported.getOrNull()?.let(store::delete)
                     else {
                         pendingImport=false
-                        imported.onSuccess { name -> temporary.add(name); draft=current.copy(image=name,background="image"); preview(); rebuildEditor() }
+                        imported.onSuccess { name ->
+                            temporary.add(name)
+                            draft=current.copy(enabled=true,image=name,background="image")
+                            appearanceSwitch?.isChecked=true
+                            backgroundSpinner?.setSelection(1)
+                            updatePreviewThumbnail()
+                            preview()
+                        }
                             .onFailure { toast("Could not import image. Use JPEG, PNG or WebP up to 20 MB.","导入失败，请选择不超过 20MB 的 JPEG、PNG 或 WebP 图片。") }
                         updateStatus()
                     }
@@ -205,7 +217,42 @@ internal class PersonalizationController(
         updateWallpaper(); editor?.let(style); directory?.let(style); updateStatus(); refresh()
     }
     private fun updateStatus() {
-        editorStatus?.text=if(pendingImport) tr("Importing…","正在导入…") else if(compatible) tr("Live preview · image stays on this device","实时预览 · 图片仅保存在本机") else tr("Page not supported yet; original page preserved","当前页面暂不支持，保留网页原样")
+        editorStatus?.text=when {
+            pendingImport -> tr("Importing…", "正在导入…")
+            !compatible -> tr("This page is not supported yet; the original page is unchanged.","当前页面暂不支持美化，已保留网页原样。")
+            current.background=="image" && current.image.isNotEmpty() -> tr("Live preview ready · the image stays on this device","预览已就绪 · 图片仅保存在本机")
+            else -> tr("Live preview · the image stays on this device","实时预览 · 图片仅保存在本机")
+        }
+    }
+    private fun updatePreviewThumbnail() {
+        val preview=previewImage ?: return
+        val config=current
+        if(pendingImport && config.image.isEmpty()) {
+            preview.visibility=View.GONE
+            return
+        }
+        if(config.background!="image" || config.image.isEmpty()) {
+            preview.setImageDrawable(null)
+            preview.visibility=View.GONE
+            return
+        }
+        preview.visibility=View.VISIBLE
+        val key="${config.image}:${config.blur}"
+        if(preview.tag==key) return
+        preview.tag=key
+        work {
+            val bitmap=runCatching { store.render(config) }.getOrNull()
+            handler.post {
+                if(disposed || previewImage!==preview || preview.tag!=key || bitmap==null) {
+                    bitmap?.recycle()
+                    if(!disposed && previewImage===preview && preview.tag==key) {
+                        preview.visibility=View.GONE
+                        preview.tag=null
+                        editorStatus?.text=tr("The image could not be previewed. Choose another JPEG, PNG or WebP.","图片预览失败，请重新选择 JPEG、PNG 或 WebP。")
+                    }
+                } else preview.setImageBitmap(bitmap)
+            }
+        }
     }
     fun showAppearance() {
         if(origin==null) { toast("Connect to a server first.","请先连接服务。"); return }
@@ -213,15 +260,14 @@ internal class PersonalizationController(
         draft=saved.copy(); revision++
         val content=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(12)) }
         fun label(value: String) { content.addView(TextView(activity).apply { text=value; textSize=14f; setPadding(0,dp(12),0,dp(4)) }) }
-        fun toggle(en: String, cn: String, checked: Boolean, change: (Boolean)->Unit) {
-            content.addView(androidx.appcompat.widget.SwitchCompat(activity).apply {
+        fun toggle(en: String, cn: String, checked: Boolean, change: (Boolean)->Unit): androidx.appcompat.widget.SwitchCompat =
+            androidx.appcompat.widget.SwitchCompat(activity).apply {
                 text=tr(en,cn); isChecked=checked; minHeight=dp(48)
                 setOnCheckedChangeListener { _,value -> change(value); preview() }
-            })
-        }
-        fun choice(title: String, labels: List<String>, index: Int, select: (Int)->Unit) {
+            }.also(content::addView)
+        fun choice(title: String, labels: List<String>, index: Int, select: (Int)->Unit): Spinner {
             label(title)
-            content.addView(Spinner(activity).apply {
+            return Spinner(activity).apply {
                 adapter=ArrayAdapter(activity,android.R.layout.simple_spinner_dropdown_item,labels)
                 setSelection(index); minimumHeight=dp(48)
                 var first=true
@@ -233,7 +279,7 @@ internal class PersonalizationController(
                         select(position); preview()
                     }
                 }
-            })
+            }.also(content::addView)
         }
         fun slider(title: String, value: Int, min: Int, max: Int, change: (Int)->Unit) {
             val caption=TextView(activity).apply { text="$title · $value"; setPadding(0,dp(12),0,0) }; content.addView(caption)
@@ -247,14 +293,32 @@ internal class PersonalizationController(
                 })
             })
         }
-        toggle("Enable appearance","启用外观定制",current.enabled) { draft=current.copy(enabled=it) }
+        appearanceSwitch=toggle("Enable appearance","启用外观定制",current.enabled) { draft=current.copy(enabled=it) }
         toggle("Conversation directory","启用对话目录",current.navigation) { draft=current.copy(navigation=it) }
         choice(tr("Palette","配色预设"),listOf(tr("Native blue","原生蓝"),tr("Sage","青灰"),tr("Warm sand","暖砂"),tr("Opaque reading","不透明阅读")),listOf("blue","sage","sand","reading").indexOf(current.preset)) {
             val preset=listOf("blue","sage","sand","reading")[it]
             if(preset!=current.preset) { draft=AppearanceConfig.preset(preset,current); rebuildEditor() }
         }
         choice(tr("Theme","明暗模式"),listOf(tr("System","跟随系统"),tr("Light","浅色"),tr("Dark","深色")),listOf("system","light","dark").indexOf(current.mode)) { draft=current.copy(mode=listOf("system","light","dark")[it]) }
-        choice(tr("Background","背景"),listOf(tr("Gradient","内置渐变"),tr("Local image","本地图片"),tr("Solid","纯色")),listOf("gradient","image","solid").indexOf(current.background)) { draft=current.copy(background=listOf("gradient","image","solid")[it]) }
+        backgroundSpinner=choice(tr("Background","背景"),listOf(tr("Gradient","内置渐变"),tr("Local image","本地图片"),tr("Solid","纯色")),listOf("gradient","image","solid").indexOf(current.background)) {
+            draft=current.copy(background=listOf("gradient","image","solid")[it])
+            updatePreviewThumbnail()
+        }
+        previewImage=ImageView(activity).apply {
+            scaleType=ImageView.ScaleType.CENTER_CROP
+            contentDescription=tr("Wallpaper preview","壁纸预览")
+            minimumHeight=dp(160)
+            setPadding(0,dp(8),0,dp(8))
+            clipToOutline=true
+            outlineProvider=object:ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0,0,view.width,view.height,dp(16).toFloat())
+                }
+            }
+            visibility=View.GONE
+        }
+        content.addView(previewImage,LinearLayout.LayoutParams(-1,dp(180)))
+        updatePreviewThumbnail()
         content.addView(Button(activity).apply {
             text=tr("Choose image (up to 20 MB)","选择图片（不超过 20MB）"); isAllCaps=false; minHeight=dp(48)
             setOnClickListener {
@@ -303,7 +367,8 @@ internal class PersonalizationController(
         }
         dialog.setOnDismissListener {
             if(editor===dialog) {
-                editor=null; editorStatus=null; draft=null; editorSession++; revision++; dirty=true; inFlight=false; pendingImport=false
+                editor=null; editorStatus=null; previewImage=null; appearanceSwitch=null; backgroundSpinner=null
+                draft=null; editorSession++; revision++; dirty=true; inFlight=false; pendingImport=false
                 temporary.forEach(store::delete); temporary.clear(); themeChanged()
                 navigationChanged(origin!=null && saved.navigation); updateWallpaper(); refresh()
             }

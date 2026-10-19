@@ -15,7 +15,7 @@ internal data class AppearanceConfig(
     val image: String = "",
     val position: Int = 50,
     val zoom: Int = 100,
-    val dim: Int = 30,
+    val dim: Int = 0,
     val blur: Int = 0,
     val opacity: Int = 90,
     val fontSize: Int = 16,
@@ -51,7 +51,7 @@ internal data class AppearanceConfig(
                 background = choice("background", listOf("gradient", "image", "solid"), "gradient"),
                 image = value.optString("image").takeIf { Regex("wallpaper-[a-f0-9-]+\\.jpg").matches(it) } ?: "",
                 position = number("position",0,100,50), zoom = number("zoom",100,200,100),
-                dim = number("dim",0,80,30), blur = number("blur",0,20,0), opacity = number("opacity",50,100,90),
+                dim = number("dim",0,80,0), blur = number("blur",0,20,0), opacity = number("opacity",50,100,90),
                 fontSize = number("fontSize",14,24,16), lineHeight = number("lineHeight",130,210,165),
             )
         }

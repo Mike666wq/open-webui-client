@@ -5,10 +5,12 @@ on:
   push:
     branches:
       - codex/android-wallpaper-diagnose
+      - codex/android-wallpaper-preview-fix
     paths:
       - .github/workflows/android-wallpaper-diagnose.yml
       - scripts/android-wallpaper-diagnose.py
       - scripts/android-wallpaper-diagnose-workflow.test.mjs
+      - src-tauri/src/connection.rs
       - src-tauri/plugins/connection-controls/android/**
 
 permissions:
