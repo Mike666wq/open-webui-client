@@ -18,6 +18,10 @@ test('wallpaper diagnosis is isolated from both quick checks and APK releases', 
 });
 
 test('wallpaper diagnosis contains a real import, visual assertion and persistence check', async () => {
+  const workflow = await readFile(
+    new URL('../.github/workflows/android-wallpaper-diagnose.yml', import.meta.url),
+    'utf8',
+  );
   const script = await readFile(
     new URL('./android-wallpaper-diagnose.py', import.meta.url),
     'utf8',
@@ -26,6 +30,14 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /ImageMagick RMSE|compare.*RMSE/s);
   assert.match(script, /def wait_for_web_page/);
   assert.match(script, /Connected WebView did not render/);
+  assert.match(script, /fixture-events\.json/);
+  assert.match(script, /__fixture_state/);
+  assert.match(script, /invokeType/);
+  const connection = await readFile(
+    new URL('../src-tauri/src/connection.rs', import.meta.url),
+    'utf8',
+  );
+  assert.match(connection, /typeof core\?\.invoke==='function'/);
   assert.match(script, /\.pixels\.txt/);
   assert.match(script, /preview the file/);
   assert.match(script, /not is_preview_action/);
@@ -47,4 +59,5 @@ test('wallpaper diagnosis contains a real import, visual assertion and persisten
   assert.match(script, /#app \{ min-height: 100dvh; background: #fff; \}/);
   assert.match(script, /#chat-container \{ background: #fff; \}/);
   assert.doesNotMatch(script, /background: transparent; \}/);
+  assert.match(workflow, /src-tauri\/src\/connection\.rs/);
 });

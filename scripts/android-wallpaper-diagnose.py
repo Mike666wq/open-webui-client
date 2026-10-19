@@ -17,6 +17,15 @@ from pathlib import Path
 PACKAGE = "local.openwebui.client"
 IMAGE_NAME = "owc-wallpaper-diagnose.png"
 PORT = 8765
+FIXTURE_LOCK = threading.Lock()
+FIXTURE_EVENTS: list[dict] = []
+
+
+def record_fixture_event(kind: str, details: dict | None = None) -> None:
+    event = {"kind": kind, "elapsed": time.monotonic(), **(details or {})}
+    with FIXTURE_LOCK:
+        FIXTURE_EVENTS.append(event)
+        del FIXTURE_EVENTS[:-200]
 
 # This is the image the user reported: appearance disabled, a saved local image,
 # and the image control still showing the gradient until Apply is enabled.
@@ -78,12 +87,31 @@ class Fixture(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def do_POST(self):
+        if self.path != "/__fixture_state":
+            self.send_error(404)
+            return
+        length = min(int(self.headers.get("Content-Length", "0")), 65536)
+        try:
+            details = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.send_error(400)
+            return
+        if not isinstance(details, dict):
+            self.send_error(400)
+            return
+        record_fixture_event("page-state", details)
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         if self.path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
             return
         if self.path == "/api/config":
+            record_fixture_event("api-config")
             body = b'{"status":true}'
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -124,7 +152,35 @@ class Fixture(BaseHTTPRequestHandler):
     <div class="user-message" id="message-wallpaper-2"><div class="rounded-3xl"><div class="markdown-prose">The image should be visible through this transparent chat surface.</div></div></div>
   </div>
   <div id="message-input-container"><textarea id="chat-input" aria-label="Message">wallpaper diagnostic</textarea></div>
-</div></div></div></div></div></main></div></body></html>"""
+</div></div></div></div></div></main></div>
+<script>
+(() => {{
+  const started = Date.now();
+  let reports = 0;
+  function report() {{
+    const tauri = window.__TAURI__;
+    const core = tauri && tauri.core;
+    const details = {{
+      elapsedMs: Date.now() - started,
+      reports: ++reports,
+      readyState: document.readyState,
+      href: location.href,
+      tauriType: typeof tauri,
+      coreType: typeof core,
+      invokeType: typeof (core && core.invoke)
+    }};
+    fetch('/__fixture_state', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(details),
+      cache: 'no-store'
+    }}).catch(() => {{}});
+  }}
+  report();
+  const timer = setInterval(report, 500);
+  setTimeout(() => clearInterval(timer), 25000);
+}})();
+</script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -247,6 +303,15 @@ def wait_for_web_page(output, *, timeout=45):
             return
         time.sleep(1)
     raise DiagnosisFailure("Connected WebView did not render within the expected time")
+
+
+def write_fixture_evidence(output: Path) -> None:
+    with FIXTURE_LOCK:
+        events = list(FIXTURE_EVENTS)
+    (output / "fixture-events.json").write_text(
+        json.dumps(events, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def tap_node(node):
@@ -694,6 +759,7 @@ def main():
         normalized_difference = image_compare(gradient, image, output)
         marker.write_text(f"pixel-compare-passed:{normalized_difference:.6f}\n", encoding="utf-8")
         persisted = collect_persisted_config(output)
+        write_fixture_evidence(output)
         result = {
             "status": "passed",
             "source_sha": args.source_sha,
@@ -712,6 +778,7 @@ def main():
         )
         print("ANDROID_WALLPAPER_DIAGNOSE_PASS")
     except Exception:
+        write_fixture_evidence(output)
         screenshot(output, "failure-screen")
         current = "/sdcard/wallpaper-failure.xml"
         local = output / "failure-ui.xml"
