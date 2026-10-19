@@ -39,6 +39,12 @@ internal class ConfigureArgs {
 }
 
 @InvokeArg
+internal class PrepareBundledFrontendArgs {
+    lateinit var origin: String
+    var generation: Long = 0
+}
+
+@InvokeArg
 internal class BeginSaveArgs {
     lateinit var transferId: String
     lateinit var filename: String
@@ -71,6 +77,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     private var settingsUri: Uri? = null
     private var backCallback: OnBackPressedCallback? = null
     private var webView: WebView? = null
+    private var bundledFrontendClient: BundledFrontendWebViewClient? = null
     private var clientUi: AndroidClientUi? = null
     private var nativeActions: app.tauri.plugin.Channel? = null
     private var nativeState: ClientStateArgs? = null
@@ -117,10 +124,22 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     }
 
     @Command
+    fun prepareBundledFrontend(invoke: Invoke) {
+        val args = invoke.parseArgs(PrepareBundledFrontendArgs::class.java)
+        // App-owned Rust must await this before navigating the WebView. It is not
+        // exposed in any page capability or command permission.
+        activity.runOnUiThread {
+            if (bundledFrontendClient?.prepare(args.origin, args.generation) == true) invoke.resolve()
+            else invoke.reject("Could not prepare the pinned bundled frontend session")
+        }
+    }
+
+    @Command
     fun renderConnectionState(invoke: Invoke) {
         val state = invoke.parseArgs(ClientStateArgs::class.java)
         activity.runOnUiThread {
             nativeState = state
+            bundledFrontendClient?.update(state)
             clientUi?.render(state)
             invoke.resolve()
         }
@@ -467,6 +486,19 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
 
     override fun load(webView: WebView) {
         this.webView = webView
+        // Wry installs its client before calling Plugin.load. Keep that original
+        // instance as the delegate, including its IPC origin and old-WebView JS
+        // initialization state, and never wrap our own wrapper a second time.
+        if (webView.webViewClient !is BundledFrontendWebViewClient) {
+            bundledFrontendClient = BundledFrontendWebViewClient(
+                webView.webViewClient, BundledFrontendAssets(activity.assets),
+            ).also { client ->
+                nativeState?.let(client::update)
+                webView.webViewClient = client
+            }
+        } else {
+            bundledFrontendClient = webView.webViewClient as BundledFrontendWebViewClient
+        }
         recordLifecycle(LifecycleMarker.APP_STARTED)
         recordLifecycle(LifecycleMarker.WEBVIEW_READY)
 
@@ -494,6 +526,10 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         backCallback = null
         clientUi?.destroy()
         clientUi = null
+        bundledFrontendClient?.let { client ->
+            if (webView?.webViewClient === client) webView?.webViewClient = client.delegate
+        }
+        bundledFrontendClient = null
         nativeActions = null
         nativeState = null
         webView = null

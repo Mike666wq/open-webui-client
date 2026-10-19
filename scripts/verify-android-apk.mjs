@@ -174,6 +174,11 @@ export function verifyAndroidApk(apkPath, versionCode, {
   const badging = run(aapt, ['dump', 'badging', absoluteApk]);
   const entries = run('unzip', ['-Z1', absoluteApk]);
   verifyAndroidApkIconResources(absoluteApk, { androidHome });
+  run('python3', [
+    fileURLToPath(new URL('./bundled-frontend-archive.py', import.meta.url)),
+    'apk', absoluteApk,
+    fileURLToPath(new URL('../frontend.lock.json', import.meta.url)),
+  ]);
   return validateAndroidApkMetadata({ badging, entries, versionCode });
 }
 

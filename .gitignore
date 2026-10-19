@@ -13,3 +13,8 @@ __pycache__/
 *.py[cod]
 
 src-tauri/android-scripts/
+src-tauri/icons/
+.codex-ui-*.png
+src-tauri/plugins/connection-controls/android/src/main/assets/bundled-frontend/
+src-tauri/plugins/connection-controls/android/src/main/assets/.bundled-frontend-*/
+open-webui-frontend/

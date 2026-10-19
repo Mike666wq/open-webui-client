@@ -7,6 +7,18 @@ internal object ClientPolicy {
     fun contentTop(safeTop: Int, toolbarHeight: Int, rootHeight: Int): Int =
         (safeTop.coerceAtLeast(0) + toolbarHeight.coerceAtLeast(0)).coerceAtMost((rootHeight - 1).coerceAtLeast(0))
 
+    fun sameServiceEntry(value: String, origin: String?): Boolean =
+        sameOrigin(value, origin) && try {
+            val uri = URI(value)
+            (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") &&
+                uri.rawQuery == null &&
+                uri.rawFragment == null &&
+                uri.host != null &&
+                uri.userInfo == null
+        } catch (_: Exception) {
+            false
+        }
+
     fun serviceLabel(origin: String?): String = try {
         val uri = URI(origin ?: "")
         val host = uri.host ?: throw IllegalArgumentException()
