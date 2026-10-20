@@ -1219,6 +1219,7 @@ def main():
         png(output / "chat-real-frontend.png")
 
         open_settings(cdp)
+        open_appearance_tab(cdp)
         settings_geometry = cdp.evaluate(
             """
             (() => {
