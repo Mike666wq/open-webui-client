@@ -912,9 +912,19 @@ def settings_open(cdp):
 
 
 def close_settings(cdp):
+    # Real success/error toasts can cover the mobile Back action. Dismiss
+    # them through their visible controls rather than clicking through them.
+    for _ in range(12):
+        if not cdp.evaluate("Boolean(document.querySelector('[data-sonner-toast]:not([data-removed=\"true\"]) [data-close-button]'))"):
+            break
+        cdp.touch_click_expression(
+            "document.querySelector('[data-sonner-toast]:not([data-removed=\"true\"]) [data-close-button]')",
+            "dismiss notification before closing settings",
+        )
+        time.sleep(0.4)
     cdp.touch_click_expression(
         """
-        [...document.querySelectorAll('button')]
+        [...document.querySelectorAll('#settings-tabs-container button')]
           .find(element=>['Back','返回'].includes(element.textContent.trim()))
         """,
         "close settings",

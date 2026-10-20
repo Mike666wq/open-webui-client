@@ -395,6 +395,12 @@ server.on('upgrade', (request, socket) => {
 			maxPayload: 1_000_000
 		})}`
 	);
+	// Engine.IO v4 sends heartbeats from the server. Without them the real
+	// client times out after pingInterval + pingTimeout during UI checks.
+	const heartbeat = setInterval(() => {
+		if (!socket.destroyed) sendText('2');
+	}, 25_000);
+	heartbeat.unref();
 	socket.on('data', (chunk) => {
 		if (chunk[0] === 0x88) {
 			socket.end(Buffer.from([0x88, 0]));
@@ -419,12 +425,13 @@ server.on('upgrade', (request, socket) => {
 			const frame = payload.toString('utf8');
 			if (frame === '2') {
 				sendText('3');
-			} else if (frame === '40') {
+			} else if (frame.startsWith('40')) {
 				sendText(`40${JSON.stringify({ sid: socketSid })}`);
 			}
 		}
 	});
 	socket.on('close', () => {
+		clearInterval(heartbeat);
 		upgradedSockets.delete(socket);
 		event('socket-close');
 	});
