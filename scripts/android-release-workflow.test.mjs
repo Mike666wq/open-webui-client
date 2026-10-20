@@ -25,4 +25,7 @@ test('Android resource packaging retains SvelteKit underscore directories', asyn
   assert.ok(ignoreAssets, 'The plugin must configure Android resource ignore patterns');
   assert.doesNotMatch(block, /ignoreAssetsPatterns\s*\+=/);
   assert.doesNotMatch(ignoreAssets, /<dir>_\*/);
+  for (const media of ['jpg', 'jpeg', 'png', 'gif', 'wav', 'mp3', 'ogg', 'mp4', '3gp', '3gpp']) {
+    assert.ok(!ignoreAssets.includes(`!*.${media}`), `The plugin must package .${media} web assets`);
+  }
 });

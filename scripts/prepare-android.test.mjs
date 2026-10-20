@@ -42,7 +42,9 @@ test('Gradle release signing reads secrets from environment and stays idempotent
   assert.ok(androidResources);
   assert.doesNotMatch(androidResources, /<dir>_\*/);
   assert.ok(androidResources.includes('!.git'));
-  assert.ok(androidResources.includes('!*.jpg'));
+  for (const media of ['jpg', 'jpeg', 'png', 'gif', 'wav', 'mp3', 'ogg', 'mp4', '3gp', '3gpp']) {
+    assert.ok(!androidResources.includes(`!*.${media}`), `The final app module must package .${media} web assets`);
+  }
   assert.match(once, /versionCode = tauriProperties\.getProperty\("tauri\.android\.versionCode", "1"\)\.toInt\(\)/);
   assert.match(once, /ANDROID_KEYSTORE_PATH/);
   assert.match(once, /if \(System\.getenv\("ANDROID_KEYSTORE_PATH"\) != null\)/);
