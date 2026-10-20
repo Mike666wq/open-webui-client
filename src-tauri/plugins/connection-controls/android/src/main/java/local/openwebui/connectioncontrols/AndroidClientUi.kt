@@ -193,14 +193,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         if (root.paddingLeft != left || root.paddingTop != safeTop || root.paddingRight != right || root.paddingBottom != bottom) {
             root.setPadding(left, safeTop, right, bottom)
         }
-        connectionScroll?.layoutParams?.let { params ->
-            val available = (root.height - safeTop - bottom).coerceAtLeast(dp(240))
-            val desired = minOf(dp(720), (available * .9f).toInt())
-            if (params.height != desired) {
-                params.height = desired
-                connectionScroll?.layoutParams = params
-            }
-        }
+        resizeConnectionPanel()
         val params = webView.layoutParams
         val width = (root.width - left - right).coerceAtLeast(1)
         val height = (root.height - top - bottom).coerceAtLeast(1)
@@ -212,6 +205,29 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             webView.layoutParams = params
         }
 
+    }
+
+    private fun resizeConnectionPanel() {
+        val scroll = connectionScroll ?: return
+        val card = connectionCard ?: return
+        if (root.height <= 0 || root.width <= 0) return
+        val width = (root.width - root.paddingLeft - root.paddingRight - dp(24)).coerceAtLeast(1)
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+        val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        card.measure(widthSpec, heightSpec)
+        val available = (
+            root.height - root.paddingTop - root.paddingBottom - dp(16)
+        ).coerceAtLeast(0)
+        val desired = ClientPolicy.connectionPanelHeight(
+            card.measuredHeight,
+            available,
+            dp(720),
+        )
+        val params = scroll.layoutParams
+        if (params is FrameLayout.LayoutParams && params.height != desired) {
+            params.height = desired
+            scroll.layoutParams = params
+        }
     }
 
     private inner class Glyph(private val kind: String, private val ink: Int) : Drawable() {
@@ -423,6 +439,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             gravity = Gravity.CENTER_HORIZONTAL
             elevation = dp(12).toFloat()
             setPadding(dp(22), dp(20), dp(22), dp(20))
+            contentDescription = tr("Connection form", "连接表单")
         }
         connectionCard = card
         val brand = TextView(activity).apply {
@@ -519,7 +536,9 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         card.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
 
         val scroll = ScrollView(activity).apply {
-            isFillViewport = true
+            // Keep short forms at their natural height and only scroll when the
+            // safe content height is insufficient.
+            isFillViewport = false
             addView(card, ViewGroup.LayoutParams(-1, -2))
         }
         connectionScroll = scroll
@@ -552,6 +571,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
         overlay.bringToFront()
         updateConnectionPanel()
+        root.post { resizeConnectionPanel() }
     }
 
     private fun hideConnectionPanel() {
@@ -631,6 +651,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         exportButton?.isEnabled = state.phase == "connected" && channel != null
         rebuildRecentServices()
         styleConnectionPanel()
+        root.post { resizeConnectionPanel() }
     }
 
     private fun rebuildRecentServices() {
@@ -676,11 +697,11 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionImage?.alpha = if (dark) .5f else .88f
         connectionScrim?.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            if (dark) intArrayOf(0xD9080D15.toInt(), 0xF4121822.toInt(), 0xFF111318.toInt())
-            else intArrayOf(0x08101820, 0xA8E7EEF4.toInt(), 0xFFF8FAFC.toInt())
+            if (dark) intArrayOf(0x72080D15, 0x9F121822.toInt(), 0xC6111318.toInt())
+            else intArrayOf(0x00101820, 0x38E7EEF4, 0xA8F8FAFC.toInt())
         )
         card.background = GradientDrawable().apply {
-            setColor(Color.argb(if (dark) 238 else 244, Color.red(surface), Color.green(surface), Color.blue(surface)))
+            setColor(Color.argb(if (dark) 194 else 206, Color.red(surface), Color.green(surface), Color.blue(surface)))
             cornerRadii = floatArrayOf(
                 dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(),
                 dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat()

@@ -22,6 +22,20 @@ class ClientPolicyTest {
         assertEquals(400, ClientPolicy.bottomOverlap(1000, 1000, 400))
         assertEquals(48, ClientPolicy.bottomOverlap(1000, 1000, 48))
     }
+    @Test fun connectionPanelUsesContentHeightWhenItFits() {
+        assertEquals(320, ClientPolicy.connectionPanelHeight(320, 800, 720))
+    }
+    @Test fun connectionPanelIsBoundedByKeyboardLandscapeAndMaximumHeight() {
+        assertEquals(400, ClientPolicy.connectionPanelHeight(900, 400, 720))
+        assertEquals(280, ClientPolicy.connectionPanelHeight(280, 280, 720))
+        assertEquals(240, ClientPolicy.connectionPanelHeight(900, 800, 240))
+    }
+    @Test fun connectionPanelNeverGetsANegativeOrImplicitHeight() {
+        assertEquals(0, ClientPolicy.connectionPanelHeight(0, 800, 720))
+        assertEquals(0, ClientPolicy.connectionPanelHeight(320, 0, 720))
+        assertEquals(0, ClientPolicy.connectionPanelHeight(320, 800, 0))
+        assertEquals(0, ClientPolicy.connectionPanelHeight(-1, -1, -1))
+    }
     @Test fun historyMustStayOnCurrentServerOrigin() {
         assertTrue(ClientPolicy.sameOrigin("https://chat.example/a", "https://chat.example"))
         assertTrue(ClientPolicy.sameOrigin("https://chat.example:443/a", "https://CHAT.example"))
