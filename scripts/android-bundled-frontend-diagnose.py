@@ -660,6 +660,12 @@ def scroll_element_to_bottom(cdp, selector, *, attempts=16):
     before = element_geometry(cdp, selector)
     if not before or before["scrollHeight"] <= before["clientHeight"] + 1:
         raise DiagnosisFailure(f"{selector} has no real scrollable overflow: {before}")
+    maximum_scroll_top = max(0, before["scrollHeight"] - before["clientHeight"])
+    if before["scrollTop"] >= maximum_scroll_top - 1:
+        # Chat pages intentionally open at the newest message. Treat that
+        # valid end position as success instead of requiring a downward swipe
+        # that the scroll container cannot accept.
+        return {"before": before, "after": before, "alreadyAtBottom": True}
     previous = before["scrollTop"]
     for _ in range(attempts):
         cdp.scroll_gesture(selector, distance=360)
