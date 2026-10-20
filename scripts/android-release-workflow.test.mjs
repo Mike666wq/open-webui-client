@@ -14,11 +14,15 @@ test('automatic APK release excludes emulator and desktop jobs while retaining p
 });
 
 test('Android resource packaging retains SvelteKit underscore directories', async () => {
-  const build = await readFile(
+  const build = (await readFile(
     new URL('../src-tauri/plugins/connection-controls/android/build.gradle.kts', import.meta.url),
     'utf8',
-  );
-  const ignoreAssets = build.match(/androidResources\s*\{[\s\S]*?ignoreAssetsPatterns\s*\+=\s*"([^"]*)"/)?.[1];
+  )).replaceAll('\r\n', '\n');
+  const block = build.match(/androidResources\s*\{\n([\s\S]*?)\n\s*\}\n\n\s*defaultConfig/)?.[1];
+  assert.ok(block, 'The plugin must configure Android resource ignore patterns');
+  assert.match(block, /ignoreAssetsPatterns\.clear\(\)/);
+  const ignoreAssets = block.match(/ignoreAssetsPatterns\.add\("([^"]*)"\)/)?.[1];
   assert.ok(ignoreAssets, 'The plugin must configure Android resource ignore patterns');
+  assert.doesNotMatch(block, /ignoreAssetsPatterns\s*\+=/);
   assert.doesNotMatch(ignoreAssets, /<dir>_\*/);
 });
