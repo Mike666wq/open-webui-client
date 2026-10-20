@@ -8,6 +8,8 @@ const androidRoot = path.join(projectRoot, 'src-tauri', 'gen', 'android');
 const ANDROID_SDK_LEVEL = 36;
 const MIN_RELEASE_VERSION_CODE = 1001;
 const MAX_RELEASE_VERSION_CODE = 2_100_000_000;
+const ANDROID_ASSET_IGNORE_PATTERNS =
+  '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!*.jpg:!*.jpeg:!*.png:!*.gif:!*.wav:!*.mp3:!*.ogg:!*.mp4:!*.3gp:!*.3gpp';
 
 export const networkSecurityConfigXml = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
@@ -80,6 +82,25 @@ function updateReleaseVersionCode(source, value) {
   return source.replace(line, `${indentation}versionCode = ${versionCode}`);
 }
 
+function ensureAppAssetsArePackaged(source) {
+  const block = `    // SvelteKit serves immutable chunks from _app. AAPT's default
+    // "<dir>_*" filter otherwise removes that directory from the final APK.
+    androidResources {
+        ignoreAssetsPatterns.clear()
+        ignoreAssetsPatterns.add("${ANDROID_ASSET_IGNORE_PATTERNS}")
+    }
+
+`;
+  if (source.includes(block)) return source;
+  if (/^\s*androidResources\s*\{/m.test(source)) {
+    throw new Error('app/build.gradle.kts already has an unexpected androidResources configuration');
+  }
+
+  const defaultConfig = /\n(\s*)defaultConfig\s*\{/;
+  if (!defaultConfig.test(source)) throw new Error('app/build.gradle.kts has no defaultConfig block');
+  return source.replace(defaultConfig, `\n${block}$1defaultConfig {`);
+}
+
 export function updateGradle(source, releaseVersionCode = null) {
   if (!source.includes('android {')) throw new Error('app/build.gradle.kts has no android block');
   const requiredEnv = `            storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: throw GradleException("ANDROID_KEYSTORE_PATH is required"))
@@ -98,6 +119,7 @@ export function updateGradle(source, releaseVersionCode = null) {
   } else if (compileSdk36.length !== 1 || targetSdk36.length !== 1 || compileSdk37.length !== 0 || targetSdk37.length !== 0) {
     throw new Error('Expected the Tauri CLI 2.12.2 Android template to declare compileSdk and targetSdk 37 exactly once');
   }
+  result = ensureAppAssetsArePackaged(result);
   result = result.replace(/manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"/g, 'manifestPlaceholders["usesCleartextTraffic"] = "false"');
   const signingBlock = `    if (System.getenv("ANDROID_KEYSTORE_PATH") != null) {
         signingConfigs {

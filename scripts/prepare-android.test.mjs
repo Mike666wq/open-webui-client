@@ -37,6 +37,12 @@ test('Gradle release signing reads secrets from environment and stays idempotent
   assert.match(once, /compileSdk = 36/);
   assert.match(once, /targetSdk = 36/);
   assert.match(once, /minSdk = 29/);
+  assert.match(once, /androidResources\s*\{\n\s*ignoreAssetsPatterns\.clear\(\)\n\s*ignoreAssetsPatterns\.add\("([^"]*)"\)/);
+  const androidResources = once.match(/androidResources\s*\{([\s\S]*?)\n\s*\}/)?.[1];
+  assert.ok(androidResources);
+  assert.doesNotMatch(androidResources, /<dir>_\*/);
+  assert.ok(androidResources.includes('!.git'));
+  assert.ok(androidResources.includes('!*.jpg'));
   assert.match(once, /versionCode = tauriProperties\.getProperty\("tauri\.android\.versionCode", "1"\)\.toInt\(\)/);
   assert.match(once, /ANDROID_KEYSTORE_PATH/);
   assert.match(once, /if \(System\.getenv\("ANDROID_KEYSTORE_PATH"\) != null\)/);
@@ -51,6 +57,20 @@ test('Gradle release signing reads secrets from environment and stays idempotent
   assert.throws(() => updateGradle(release, 1043), /unexpected Android defaultConfig versionCode/);
   assert.throws(() => updateGradle(once, 1000), /between 1001 and 2100000000/);
   assert.throws(() => updateGradle(once, 2_100_000_001), /between 1001 and 2100000000/);
+});
+
+test('app Gradle rejects an unexpected Android asset filter instead of duplicating rules', () => {
+  const input = `android {
+    compileSdk = 36
+    androidResources {
+        ignoreAssetsPatterns.add("<dir>_*")
+    }
+    defaultConfig {
+        minSdk = 29
+        targetSdk = 36
+    }
+}`;
+  assert.throws(() => updateGradle(input), /unexpected androidResources configuration/);
 });
 
 
