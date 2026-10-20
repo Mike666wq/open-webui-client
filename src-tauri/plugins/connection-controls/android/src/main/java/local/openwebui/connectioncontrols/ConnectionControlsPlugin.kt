@@ -33,6 +33,7 @@ private const val MAX_BASE64_CHARS = ((MAX_CHUNK_BYTES + 2) / 3) * 4
 private const val PICKER_EXPIRY_MS = 10 * 60 * 1000L
 private const val LOG_TAG = "ConnectionControls"
 private const val DIAGNOSTICS_FILE = "android-diagnostics.txt"
+private const val NOTIFY_BRIDGE_NAME = "__openWebUiNotify"
 
 @InvokeArg
 internal class ConfigureArgs {
@@ -80,6 +81,7 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
     private var webView: WebView? = null
     private var bundledFrontendClient: BundledFrontendWebViewClient? = null
     private var clientUi: AndroidClientUi? = null
+    private var notificationCenter: ClientNotificationCenter? = null
     private var nativeActions: app.tauri.plugin.Channel? = null
     private var nativeState: ClientStateArgs? = null
 
@@ -508,6 +510,15 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         recordLifecycle(LifecycleMarker.APP_STARTED)
         recordLifecycle(LifecycleMarker.WEBVIEW_READY)
 
+        // System-notification bridge: the bundled web UI posts message and
+        // member-presence events to `window.__openWebUiNotify`, and the native
+        // layer raises real Android notifications for them. The object is
+        // write-only from the page (no method returns data), so this is not a
+        // data channel into the WebView.
+        notificationCenter = ClientNotificationCenter(activity)
+        notificationCenter?.ensureChannels()
+        webView.addJavascriptInterface(ClientNotifyBridge(notificationCenter!!), NOTIFY_BRIDGE_NAME)
+
         // Tauri's built-in AppPlugin installs its dispatcher callback during plugin setup.
         // Posting here makes this app-specific callback the later, higher-priority callback.
         webView.post {
@@ -530,6 +541,8 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
         recordLifecycle(LifecycleMarker.ACTIVITY_DESTROYED)
         backCallback?.remove()
         backCallback = null
+        webView?.removeJavascriptInterface(NOTIFY_BRIDGE_NAME)
+        notificationCenter = null
         clientUi?.destroy()
         clientUi = null
         bundledFrontendClient?.let { client ->
