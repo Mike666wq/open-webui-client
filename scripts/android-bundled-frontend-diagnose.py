@@ -1360,8 +1360,9 @@ def main():
         rotation_marker = cdp.evaluate(
             "(() => { window.__diagnosisRotationMarker='kept'; return window.__diagnosisRotationMarker; })()"
         )
-        shell("settings put system user_rotation 1")
-        time.sleep(4)
+        shell("input keyevent KEYCODE_BACK")
+        shell("wm user-rotation lock 1")
+        evaluate_until(cdp, "innerWidth > innerHeight", timeout=30)
         rotated_ready = wait_bundle_ready(cdp, args.frontend_sha)
         rotated_width = int(cdp.evaluate("innerWidth"))
         rotated_height = int(cdp.evaluate("innerHeight"))
@@ -1386,8 +1387,8 @@ def main():
             + "\n",
             encoding="utf-8",
         )
-        shell("settings put system user_rotation 0")
-        time.sleep(4)
+        shell("wm user-rotation lock 0")
+        evaluate_until(cdp, "innerWidth < innerHeight", timeout=30)
         wait_bundle_ready(cdp, args.frontend_sha)
 
         shell("input keyevent KEYCODE_HOME")
@@ -1450,6 +1451,7 @@ def main():
             pass
         raise
     finally:
+        shell("wm user-rotation free", check=False)
         shell("settings put system user_rotation 0", check=False)
         shell("settings put system font_scale 1.0", check=False)
         shell("settings put system accelerometer_rotation 1", check=False)
