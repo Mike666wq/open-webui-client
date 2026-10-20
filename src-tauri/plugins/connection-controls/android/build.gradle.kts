@@ -9,6 +9,12 @@ android {
     namespace = "local.openwebui.connectioncontrols"
     compileSdk = 36
 
+    // SvelteKit serves its immutable chunks from /_app. AAPT otherwise drops
+    // every directory beginning with an underscore from the APK.
+    androidResources {
+        ignoreAssetsPatterns += "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!*.jpg:!*.jpeg:!*.png:!*.gif:!*.wav:!*.mp3:!*.ogg:!*.mp4:!*.3gp:!*.3gpp"
+    }
+
     defaultConfig {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")

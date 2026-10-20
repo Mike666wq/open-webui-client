@@ -14,6 +14,16 @@ test('AAPT-sized command output is not truncated at Node’s default subprocess 
   assert.equal(output.length, 2 * 1024 * 1024);
 });
 
+test('failed validation commands surface the first stderr line instead of only the exit code', () => {
+  assert.throws(
+    () => runValidationCommand(process.execPath, [
+      '-e',
+      'process.stderr.write("APK frontend inventory mismatch\\nsecond line\\n"); process.exit(7)',
+    ]),
+    /validation failed \(exit 7\): APK frontend inventory mismatch/,
+  );
+});
+
 test('signed release APK metadata must match package, minSdk, ARM64 ABI and pinned code', () => {
   assert.deepEqual(validateAndroidApkMetadata({ badging, entries, versionCode: 1042 }), {
     applicationId: 'local.openwebui.client',
