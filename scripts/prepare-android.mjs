@@ -8,8 +8,10 @@ const androidRoot = path.join(projectRoot, 'src-tauri', 'gen', 'android');
 const ANDROID_SDK_LEVEL = 36;
 const MIN_RELEASE_VERSION_CODE = 1001;
 const MAX_RELEASE_VERSION_CODE = 2_100_000_000;
+// AAPT applies "!" entries as filters and only suppresses their warnings.
+// Preserve its developer-file cleanup without filtering web media or "_app".
 const ANDROID_ASSET_IGNORE_PATTERNS =
-  '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!*.jpg:!*.jpeg:!*.png:!*.gif:!*.wav:!*.mp3:!*.ogg:!*.mp4:!*.3gp:!*.3gpp';
+  '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~';
 
 export const networkSecurityConfigXml = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>

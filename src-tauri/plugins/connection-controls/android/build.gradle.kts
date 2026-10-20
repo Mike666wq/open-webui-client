@@ -12,9 +12,10 @@ android {
     // SvelteKit serves its immutable chunks from /_app. AAPT otherwise drops
     // every directory beginning with an underscore from the APK.
     androidResources {
-        // Replace the Android default list because it includes "<dir>_*".
+        // Keep AAPT's developer-file cleanup without its "<dir>_*" rule.
+        // The "!" prefix suppresses warnings; it does not make a pattern inclusive.
         ignoreAssetsPatterns.clear()
-        ignoreAssetsPatterns.add("!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!*.jpg:!*.jpeg:!*.png:!*.gif:!*.wav:!*.mp3:!*.ogg:!*.mp4:!*.3gp:!*.3gpp")
+        ignoreAssetsPatterns.add("!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~")
     }
 
     defaultConfig {
