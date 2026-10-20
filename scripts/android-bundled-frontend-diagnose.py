@@ -482,9 +482,29 @@ def wait_bundle_ready(cdp, expected_frontend_sha):
 
 
 def open_settings(cdp):
-    # The user menu is available both in the narrow rail and in the expanded
-    # sidebar. Its Settings action is stable in both layouts and works on
-    # Android where the desktop keyboard shortcut is not part of the product.
+    # Android starts with the mobile drawer closed. Open it through the real
+    # navbar control before looking for the user menu at the bottom.
+    cdp.touch_click_expression(
+        """
+        document.querySelector('#sidebar-toggle-button') ||
+        document.querySelector(
+          'button[aria-label="Open Sidebar"], button[aria-label="展开侧边栏"]'
+        )
+        """,
+        "open sidebar",
+    )
+    evaluate_until(
+        cdp,
+        """
+        (() => {
+          const sidebar=document.querySelector('#sidebar');
+          return sidebar?.getAttribute('aria-hidden') === 'false' &&
+            Boolean(document.querySelector(
+              'button[aria-label="User menu"], button[aria-label="用户菜单"]'
+            ));
+        })()
+        """,
+    )
     cdp.touch_click_expression(
         """
         document.querySelector('button[aria-label="User menu"]') ||
