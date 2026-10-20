@@ -142,6 +142,10 @@ jobs:
             const expected = process.env.FRONTEND_COMMIT;
             if (result.sourceCommit !== expected) throw new Error("Prepared bundle SHA mismatch");
           '
+      - name: Build x86_64 debug diagnostic APK
+        run: |
+          node scripts/prepare-android.mjs
+          npm run tauri -- android build --debug --apk --target x86_64
       - name: Run Android native policy and bundle unit tests
         shell: bash
         run: |
@@ -156,10 +160,6 @@ jobs:
           test "${#plugin_projects[@]}" -eq 1
           src-tauri/gen/android/gradlew -p src-tauri/gen/android \
             "${plugin_projects[0]}:testDebugUnitTest" --console=plain
-      - name: Build x86_64 debug diagnostic APK
-        run: |
-          node scripts/prepare-android.mjs
-          npm run tauri -- android build --debug --apk --target x86_64
       - name: Verify diagnostic APK
         shell: bash
         run: |
