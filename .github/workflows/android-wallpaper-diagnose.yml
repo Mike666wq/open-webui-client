@@ -21,6 +21,7 @@ on:
     paths:
       - .github/workflows/android-wallpaper-diagnose.yml
       - scripts/android-bundled-frontend-diagnose.py
+      - scripts/android-bundled-frontend-diagnose-unit-test.py
       - scripts/create-runner-frontend-lock.mjs
       - scripts/create-runner-frontend-lock.test.mjs
       - scripts/android-bundled-frontend-diagnose.test.mjs
@@ -89,6 +90,10 @@ jobs:
           key: android-wallpaper-x86_64
       - name: Install frontend dependencies
         run: npm ci
+      - name: Verify Android diagnosis harness
+        run: |
+          npm test
+          python3 scripts/android-bundled-frontend-diagnose-unit-test.py
       - name: Fetch locked Rust dependencies
         shell: bash
         run: |

@@ -180,8 +180,7 @@ def wait_for_keyboard(*, timeout=20):
     raise DiagnosisFailure("The Android keyboard did not become visible")
 
 
-def keyboard_top():
-    dump = shell("dumpsys window windows", check=False)
+def parse_keyboard_top(dump):
     candidates = []
     for block in re.split(r"(?=Window #\d+)", dump):
         if (
@@ -192,10 +191,19 @@ def keyboard_top():
             continue
         if "isVisible=true" not in block and "mHasSurface=true" not in block:
             continue
-        frame = re.search(r"(?:mFrame|frame)=\[(-?\d+),(-?\d+)\]\[", block)
-        if frame:
-            candidates.append(int(frame.group(2)))
+        # Some Android releases report the IME window as a full-screen
+        # transparent container. Its touchable region is the visible keyboard.
+        for region in re.finditer(r"touchable region=SkRegion\(\(([^)]+)\)\)", block):
+            values = [int(value) for value in re.findall(r"-?\d+", region.group(1))]
+            for index in range(0, len(values) - 3, 4):
+                top = values[index + 1]
+                if top > 0:
+                    candidates.append(top)
     return min(candidates) if candidates else None
+
+
+def keyboard_top():
+    return parse_keyboard_top(shell("dumpsys window windows", check=False))
 
 
 def wait_for_webview_debug():
