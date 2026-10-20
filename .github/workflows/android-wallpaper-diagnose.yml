@@ -101,6 +101,7 @@ jobs:
         id: frontend
         shell: bash
         env:
+          NODE_OPTIONS: --max-old-space-size=6144
           FRONTEND_REPOSITORY: Mike666wq/open-webui-frontend
           FRONTEND_REF: ${{ inputs.frontend_ref || 'codex/mist-glass-ui' }}
           EXPECTED_FRONTEND_COMMIT: ${{ inputs.frontend_commit || '' }}
