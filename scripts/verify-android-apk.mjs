@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const EXPECTED_APPLICATION_ID = 'local.openwebui.client';
 const EXPECTED_MIN_SDK = 29;
 const MAX_VALIDATOR_OUTPUT_BYTES = 32 * 1024 * 1024;
+const MAX_VALIDATOR_ERROR_CHARS = 240;
 
 export function validateAndroidApkMetadata({ badging, entries, versionCode }) {
   if (!Number.isSafeInteger(versionCode) || versionCode < 1001 || versionCode > 2_100_000_000) {
@@ -136,8 +137,12 @@ export function runValidationCommand(program, args, env = process.env) {
     maxBuffer: MAX_VALIDATOR_OUTPUT_BYTES,
   });
   if (result.error || result.status !== 0) {
-    const detail = path.basename(program) === 'aapt'
-      ? `: ${(result.stderr ?? '').trim().split(/\r?\n/)[0].slice(0, 240)}`
+    const firstErrorLine = `${result.stderr ?? ''}\n${result.stdout ?? ''}`
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    const detail = firstErrorLine
+      ? `: ${firstErrorLine.slice(0, MAX_VALIDATOR_ERROR_CHARS)}`
       : '';
     const status = result.error?.code ?? `exit ${result.status}`;
     throw new Error(`${path.basename(program)} validation failed (${status})${detail}`);
