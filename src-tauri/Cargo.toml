@@ -1,6 +1,6 @@
 [package]
 name = "open-webui-client"
-version = "0.2.20"
+version = "0.2.21"
 description = "Open WebUI Client"
 authors = ["Open WebUI Client"]
 edition = "2024"
