@@ -77,6 +77,8 @@ test('fixture serves every page from the verified bundle and APIs separately', a
 		assert.equal(chats[0].id, 'layout-fixture');
 		assert.equal((await fetch(`${origin}/api/chats/`)).status, 404);
 		const chat = await (await fetch(`${origin}/api/v1/chats/layout-fixture`)).json();
+		assert.equal(chat.user_id, 'fixture-user');
+		assert.equal(chat.chat.user_id, 'fixture-user');
 		assert.equal(chat.chat.history.currentId, 'fixture-assistant');
 		assert.equal(
 			(

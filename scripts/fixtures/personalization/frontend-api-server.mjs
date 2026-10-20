@@ -70,12 +70,14 @@ const messages = {
 
 const chat = {
 	id: conversationId,
+	user_id: userId,
 	title: '安卓布局专项验收',
 	created_at: now - 120,
 	updated_at: now - 60,
 	currentId: assistantId,
 	chat: {
 		id: conversationId,
+		user_id: userId,
 		title: '安卓布局专项验收',
 		models: ['fixture-model'],
 		params: {},
