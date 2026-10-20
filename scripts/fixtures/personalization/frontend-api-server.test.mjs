@@ -65,7 +65,14 @@ test('fixture serves every page from the verified bundle and APIs separately', a
 		assert.equal((await fetch(`${origin}/c/fixture`)).status, 200);
 		assert.match(await (await fetch(`${origin}/`)).text(), /real-svelte/);
 		assert.equal((await fetch(`${origin}/api/v1/auths/`)).status, 200);
-		assert.equal((await fetch(`${origin}/api/v1/users/user/settings`)).status, 200);
+		const userSettingsResponse = await fetch(`${origin}/api/v1/users/user/settings`);
+		assert.equal(userSettingsResponse.status, 200);
+		const userSettings = await userSettingsResponse.json();
+		assert.equal(
+			userSettings.ui.version,
+			manifest.upstreamVersion,
+			'fixture settings must match the app version so the official changelog modal does not cover the diagnostic page'
+		);
 		const models = await (await fetch(`${origin}/api/models`)).json();
 		assert.equal(models.data[0].id, 'fixture-model');
 		assert.equal((await fetch(`${origin}/api/v1/models`)).status, 404);

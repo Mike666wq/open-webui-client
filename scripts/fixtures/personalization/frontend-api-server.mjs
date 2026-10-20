@@ -208,7 +208,7 @@ function api(pathname) {
 	if (pathname === '/api/v1/auths/') return user;
 	if (pathname === '/api/v1/users/user/settings') {
 		return {
-			ui: { theme: 'light', chatDirection: 'ltr' },
+			ui: { theme: 'light', chatDirection: 'ltr', version: config.version },
 			keybindings: {}
 		};
 	}
