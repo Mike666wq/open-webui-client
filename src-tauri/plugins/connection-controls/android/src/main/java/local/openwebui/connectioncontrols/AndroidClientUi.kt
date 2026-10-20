@@ -697,7 +697,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionImage?.alpha = if (dark) .5f else .88f
         connectionScrim?.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            if (dark) intArrayOf(0x72080D15, 0x9F121822, 0xC6111318.toInt())
+            if (dark) intArrayOf(0x72080D15, 0x9F121822.toInt(), 0xC6111318.toInt())
             else intArrayOf(0x00101820, 0x38E7EEF4, 0xA8F8FAFC.toInt())
         )
         card.background = GradientDrawable().apply {
