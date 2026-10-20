@@ -40,6 +40,8 @@ test('Android diagnosis uses the real app and pinned API-only frontend', async (
 	assert.match(workflow, /artifact-ids:/);
 	assert.match(workflow, /npm ci --prefix "\$frontend" --no-audit --no-fund/);
 	assert.match(workflow, /NODE_OPTIONS: --max-old-space-size=6144/);
+	assert.match(workflow, /export FRONTEND_COMMIT="\$commit"/);
+	assert.match(workflow, /export FRONTEND_ROOT="\$frontend"/);
 	assert.doesNotMatch(workflow, /python\s+scripts\/android-wallpaper-diagnose\.py/);
 	assert.doesNotMatch(workflow, /windows-|macos-|release-orchestrator\.mjs publish/);
 	assert.doesNotMatch(workflow, /60 seconds|3 cold launches|cold-start/i);

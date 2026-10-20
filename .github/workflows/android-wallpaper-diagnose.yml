@@ -122,6 +122,8 @@ jobs:
           echo "frontend_root=$frontend" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "FRONTEND_ROOT=$frontend" >> "$GITHUB_ENV"
+          export FRONTEND_COMMIT="$commit"
+          export FRONTEND_ROOT="$frontend"
           npm ci --prefix "$frontend" --no-audit --no-fund
           npm --prefix "$frontend" run test:frontend -- --run
           npm --prefix "$frontend" run build
