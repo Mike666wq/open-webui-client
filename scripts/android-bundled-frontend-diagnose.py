@@ -292,14 +292,14 @@ class CDP:
         result = self.send("Page.captureScreenshot", {"format": "png", "fromSurface": True})
         path.write_bytes(base64.b64decode(result["data"]))
 
-    def scroll_gesture(self, selector, *, y_ratio=0.78, distance=420, downward=True):
+    def scroll_gesture(self, selector, *, x_ratio=0.5, y_ratio=0.78, distance=420, downward=True):
         rect = self.evaluate(public_rect(selector))
         if not rect or rect["width"] <= 0 or rect["height"] <= 0:
             raise DiagnosisFailure(f"Cannot scroll missing element: {selector}")
         self.send(
             "Input.synthesizeScrollGesture",
             {
-                "x": int(rect["left"] + rect["width"] / 2),
+                "x": int(rect["left"] + rect["width"] * x_ratio),
                 "y": int(rect["top"] + rect["height"] * y_ratio),
                 "yDistance": (-abs(distance) if downward else abs(distance)),
                 "speed": 900,
@@ -688,7 +688,9 @@ def scroll_element_to_bottom(cdp, selector, *, attempts=16):
         return {"before": before, "after": before, "alreadyAtBottom": True}
     previous = before["scrollTop"]
     for _ in range(attempts):
-        cdp.scroll_gesture(selector, distance=360)
+        # The real chat's jump-to-latest button sits at bottom center and
+        # intercepts a swipe there, especially in a short landscape viewport.
+        cdp.scroll_gesture(selector, distance=360, x_ratio=0.15 if selector == "#messages-container" else 0.5)
         time.sleep(0.25)
         current = element_geometry(cdp, selector)
         if not current:
