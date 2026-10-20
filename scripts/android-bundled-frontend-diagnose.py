@@ -1360,7 +1360,8 @@ def main():
         rotation_marker = cdp.evaluate(
             "(() => { window.__diagnosisRotationMarker='kept'; return window.__diagnosisRotationMarker; })()"
         )
-        shell("input keyevent KEYCODE_BACK")
+        if keyboard_top() is not None:
+            shell("input keyevent KEYCODE_BACK")
         shell("wm user-rotation lock 1")
         evaluate_until(cdp, "innerWidth > innerHeight", timeout=30)
         rotated_ready = wait_bundle_ready(cdp, args.frontend_sha)
