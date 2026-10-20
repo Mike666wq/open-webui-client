@@ -11,6 +11,10 @@ on:
         description: Optional full SHA that frontend_ref must resolve to
         required: false
         default: ''
+      reuse_apk_run_id:
+        description: Optional prior run ID; reuse its verified APK for harness-only changes
+        required: false
+        default: ''
   push:
     branches:
       - codex/android-layout-fix
@@ -37,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: android-wallpaper-diagnose-${{ github.ref }}
@@ -50,6 +55,7 @@ env:
 
 jobs:
   build:
+    if: ${{ inputs.reuse_apk_run_id == '' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     outputs:
@@ -197,12 +203,35 @@ jobs:
 
   emulator:
     needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate diagnostic APK reuse
+        if: ${{ inputs.reuse_apk_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN: ${{ inputs.reuse_apk_run_id }}
+          EXPECTED_FRONTEND: ${{ inputs.frontend_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REUSE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_FRONTEND" =~ ^[0-9a-f]{40}$ ]]
+          prior_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN" --jq .head_sha)"
+          git cat-file -e "$prior_sha^{commit}"
+          changed="$(git diff --name-only "$prior_sha" "$GITHUB_SHA")"
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              scripts/android-bundled-frontend-diagnose.py|scripts/android-bundled-frontend-diagnose-unit-test.py|scripts/fixtures/personalization/*|scripts/*test.mjs|.github/workflows/android-wallpaper-diagnose.yml) ;;
+              *) echo "APK reuse blocked by product change: $file"; exit 1 ;;
+            esac
+          done <<< "$changed"
+          echo "Reusing APK built from $prior_sha; harness $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -224,9 +253,17 @@ jobs:
             "emulator" \
             "system-images;android-36;google_apis;x86_64"
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.reuse_apk_run_id == '' }}
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           merge-multiple: true
+          path: ${{ runner.temp }}/android-wallpaper-apk
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.reuse_apk_run_id != '' }}
+        with:
+          name: android-wallpaper-diagnostic-apk-${{ inputs.reuse_apk_run_id }}-1
+          run-id: ${{ inputs.reuse_apk_run_id }}
+          github-token: ${{ github.token }}
           path: ${{ runner.temp }}/android-wallpaper-apk
       - name: Install browser inspection dependencies
         run: |
@@ -280,14 +317,14 @@ jobs:
           cd "$RUNNER_TEMP/android-wallpaper-apk"
           sha256sum --check SHA256SUMS
           sha256sum --check frontend-manifest.sha256
-          test "$(cat frontend-commit.txt)" = "${{ needs.build.outputs.frontend_commit }}"
+          test "$(cat frontend-commit.txt)" = "${{ needs.build.outputs.frontend_commit || inputs.frontend_commit }}"
           python3 "$GITHUB_WORKSPACE/scripts/bundled-frontend-archive.py" verify \
             bundled-frontend frontend.lock.json > bundled-frontend-verification.json
           adb install -r wallpaper-diagnostic.apk
       - name: Start API-only fixture for the real bundled frontend
         shell: bash
         env:
-          FRONTEND_COMMIT: ${{ needs.build.outputs.frontend_commit }}
+          FRONTEND_COMMIT: ${{ needs.build.outputs.frontend_commit || inputs.frontend_commit }}
         run: |
           set -euo pipefail
           bundle="$RUNNER_TEMP/android-wallpaper-apk/bundled-frontend"
@@ -317,7 +354,7 @@ jobs:
       - name: Run Android layout and bundled frontend diagnosis
         shell: bash
         env:
-          FRONTEND_COMMIT: ${{ needs.build.outputs.frontend_commit }}
+          FRONTEND_COMMIT: ${{ needs.build.outputs.frontend_commit || inputs.frontend_commit }}
         run: |
           set +e
           python scripts/android-bundled-frontend-diagnose.py \

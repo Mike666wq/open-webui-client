@@ -1104,6 +1104,23 @@ def assert_chat_layout(cdp, *, label):
     return metrics
 
 
+def connection_content_tail(card, connect_bounds):
+    card_bounds = bounds(card)
+    # Recent servers and utility actions follow Connect. They are content,
+    # not empty padding. Count visible leaves, never the wrapping containers.
+    content_bottom = connect_bounds[3]
+    for child in card.iter("node"):
+        if len(child) or not (child.get("text") or child.get("clickable") == "true"):
+            continue
+        try:
+            rect = bounds(child)
+        except DiagnosisFailure:
+            continue
+        if rect[1] >= card_bounds[1] and rect[3] <= card_bounds[3]:
+            content_bottom = max(content_bottom, rect[3])
+    return card_bounds[3] - content_bottom
+
+
 def assert_connection_panel(
     output,
     *,
@@ -1124,7 +1141,7 @@ def assert_connection_panel(
         raise DiagnosisFailure(f"{label} connection card crosses the viewport: {card_bounds}")
     if connect_bounds[3] > card_bounds[3]:
         raise DiagnosisFailure(f"{label} connect action extends beyond its card")
-    tail = card_bounds[3] - connect_bounds[3]
+    tail = connection_content_tail(card, connect_bounds)
     if tail > int(108 * density):
         raise DiagnosisFailure(
             f"{label} connection card leaves a {tail / density:.1f}dp empty tail"

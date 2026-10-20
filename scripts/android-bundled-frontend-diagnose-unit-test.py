@@ -3,6 +3,7 @@ import pathlib
 import sys
 import types
 import unittest
+import xml.etree.ElementTree as ET
 
 
 WEBSOCKET = types.ModuleType("websocket")
@@ -23,6 +24,19 @@ SPEC.loader.exec_module(MODULE)
 
 
 class KeyboardGeometryTest(unittest.TestCase):
+    def test_recent_services_are_content_not_empty_connection_card_tail(self):
+        card = ET.fromstring('''<node bounds="[0,0][400,1000]">
+          <node bounds="[10,400][390,500]" text="Switch server" />
+          <node bounds="[10,520][390,950]"><node bounds="[20,550][380,940]" text="Current server" /></node>
+        </node>''')
+        self.assertEqual(MODULE.connection_content_tail(card, [10,400,390,500]), 60)
+
+    def test_wrapping_container_does_not_hide_real_empty_tail(self):
+        card = ET.fromstring('''<node bounds="[0,0][400,1000]">
+          <node bounds="[0,0][400,1000]"><node bounds="[10,400][390,500]" text="Connect securely" /></node>
+        </node>''')
+        self.assertEqual(MODULE.connection_content_tail(card, [10,400,390,500]), 500)
+
     def test_uses_ime_touchable_region_when_window_is_full_screen(self):
         dump = """
   Window #7 Window{4afd0af u0 InputMethod}:
