@@ -5,7 +5,17 @@ import types
 import unittest
 
 
-sys.modules.setdefault("websocket", types.ModuleType("websocket"))
+WEBSOCKET = types.ModuleType("websocket")
+WEBSOCKET_OPTIONS = {}
+
+
+def create_connection(url, **options):
+    WEBSOCKET_OPTIONS.update({"url": url, **options})
+    return object()
+
+
+WEBSOCKET.create_connection = create_connection
+sys.modules["websocket"] = WEBSOCKET
 SCRIPT = pathlib.Path(__file__).with_name("android-bundled-frontend-diagnose.py")
 SPEC = importlib.util.spec_from_file_location("android_bundled_frontend_diagnose", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -35,6 +45,17 @@ class KeyboardGeometryTest(unittest.TestCase):
     isVisible=true
 """
         self.assertIsNone(MODULE.parse_keyboard_top(dump))
+
+    def test_cdp_socket_suppresses_the_browser_origin_header(self):
+        MODULE.open_cdp_socket("ws://127.0.0.1:9222/devtools/page/example")
+        self.assertEqual(
+            WEBSOCKET_OPTIONS,
+            {
+                "url": "ws://127.0.0.1:9222/devtools/page/example",
+                "timeout": 30,
+                "suppress_origin": True,
+            },
+        )
 
 
 if __name__ == "__main__":

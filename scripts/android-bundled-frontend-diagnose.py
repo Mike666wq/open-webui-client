@@ -234,9 +234,19 @@ def wait_for_webview_debug():
     )
 
 
+def open_cdp_socket(websocket_url):
+    # WebView's DevTools endpoint rejects browser-style Origin headers. The
+    # diagnostic is a raw debugger client, so do not claim a page origin.
+    return websocket.create_connection(
+        websocket_url,
+        timeout=30,
+        suppress_origin=True,
+    )
+
+
 class CDP:
     def __init__(self, websocket_url):
-        self.ws = websocket.create_connection(websocket_url, timeout=30)
+        self.ws = open_cdp_socket(websocket_url)
         self.request_id = 0
 
     def send(self, method, params=None, *, timeout=30):
