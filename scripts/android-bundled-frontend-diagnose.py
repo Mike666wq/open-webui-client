@@ -393,32 +393,92 @@ def assert_rect_inside(name, rect, width, height, *, expected_right=None):
         )
 
 
-def wait_bundle_ready(cdp, expected_frontend_sha):
-    ready = evaluate_until(
-        cdp,
+def bundle_state(cdp):
+    return cdp.evaluate(
         """
         (async () => {
           const response = await fetch('/__fixture_provenance', {cache:'no-store'});
           const provenance = response.ok ? await response.json() : null;
+          const app = Boolean(document.querySelector('.owui-mist-app'));
+          const auth = Boolean(
+            document.querySelector('#auth-login-card form #email') &&
+            document.querySelector('#auth-login-card form #password')
+          );
           return {
-            found: document.body.innerText.length > 20 &&
-              Boolean(document.querySelector('.owui-mist-app')),
+            app,
+            auth,
             provenanceCommit: provenance?.sourceCommit ?? null,
             title: document.title,
             htmlCount: document.querySelectorAll('body *').length,
             location: location.href
           };
         })()
-        """,
+        """
     )
-    if ready.get("provenanceCommit") != expected_frontend_sha:
+
+
+def wait_for_bundle_state(cdp, expected_frontend_sha, *, timeout=60):
+    deadline = time.monotonic() + timeout
+    latest = None
+    while time.monotonic() < deadline:
+        latest = bundle_state(cdp)
+        if latest.get("provenanceCommit") != expected_frontend_sha:
+            raise DiagnosisFailure(
+                "The WebView was not served by the pinned API-only frontend fixture: "
+                f"{latest}"
+            )
+        if latest.get("app") or latest.get("auth"):
+            return latest
+        time.sleep(0.25)
+    raise DiagnosisFailure(f"The bundled Svelte application did not render: {latest}")
+
+
+def sign_in_fixture(cdp):
+    submitted = cdp.evaluate(
+        """
+        (() => {
+          const form=document.querySelector('#auth-login-card form');
+          const email=document.querySelector('#auth-login-card #email');
+          const password=document.querySelector('#auth-login-card #password');
+          if(!form || !email || !password) return false;
+          const setter=Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            'value'
+          ).set;
+          setter.call(email,'fixture@example.invalid');
+          email.dispatchEvent(new Event('input',{bubbles:true}));
+          email.dispatchEvent(new Event('change',{bubbles:true}));
+          setter.call(password,'fixture-password');
+          password.dispatchEvent(new Event('input',{bubbles:true}));
+          password.dispatchEvent(new Event('change',{bubbles:true}));
+          form.requestSubmit();
+          return true;
+        })()
+        """
+    )
+    if not submitted:
+        raise DiagnosisFailure("The fixture sign-in form is missing")
+    return submitted
+
+
+def wait_bundle_ready(cdp, expected_frontend_sha):
+    state = wait_for_bundle_state(cdp, expected_frontend_sha)
+    if state.get("auth"):
+        sign_in_fixture(cdp)
+        deadline = time.monotonic() + 60
+        latest = None
+        while time.monotonic() < deadline:
+            latest = bundle_state(cdp)
+            if latest.get("app"):
+                return latest
+            time.sleep(0.25)
         raise DiagnosisFailure(
-            "The WebView was not served by the pinned API-only frontend fixture: "
-            f"{ready}"
+            "The bundled Svelte application did not render after fixture sign-in: "
+            f"{latest}"
         )
-    if not ready.get("found"):
-        raise DiagnosisFailure(f"The bundled Svelte application did not render: {ready}")
-    return ready
+    if not state.get("app"):
+        raise DiagnosisFailure(f"The bundled Svelte application did not render: {state}")
+    return state
 
 
 def open_settings(cdp):
@@ -1120,13 +1180,6 @@ def main():
         cdp = CDP(target["webSocketDebuggerUrl"])
         cdp.send("Page.enable")
         cdp.send("Runtime.enable")
-        cdp.evaluate(
-            """
-            localStorage.setItem('token','fixture-token');
-            location.reload();
-            """
-        )
-        time.sleep(2)
         ready = wait_bundle_ready(cdp, args.frontend_sha)
         (output / "frontend-ready.json").write_text(
             json.dumps(ready, indent=2) + "\n", encoding="utf-8"

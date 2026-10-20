@@ -57,6 +57,41 @@ class KeyboardGeometryTest(unittest.TestCase):
             },
         )
 
+    def test_auth_page_waits_for_mount_then_signs_in_to_the_app(self):
+        states = [
+            {
+                "app": False,
+                "auth": False,
+                "provenanceCommit": "a" * 40,
+            },
+            {
+                "app": False,
+                "auth": True,
+                "provenanceCommit": "a" * 40,
+            },
+            {
+                "app": True,
+                "auth": False,
+                "provenanceCommit": "a" * 40,
+            },
+        ]
+
+        class FakeCDP:
+            def __init__(self):
+                self.evaluations = 0
+
+            def evaluate(self, expression):
+                if "form.requestSubmit" in expression:
+                    return True
+                state = states[self.evaluations]
+                self.evaluations += 1
+                return state
+
+        cdp = FakeCDP()
+        ready = MODULE.wait_bundle_ready(cdp, "a" * 40)
+        self.assertTrue(ready["app"])
+        self.assertEqual(cdp.evaluations, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
