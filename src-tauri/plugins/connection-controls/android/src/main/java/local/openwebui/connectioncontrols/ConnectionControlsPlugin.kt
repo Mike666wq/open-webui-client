@@ -3,6 +3,7 @@ package local.openwebui.connectioncontrols
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -486,6 +487,11 @@ class ConnectionControlsPlugin(private val activity: Activity) : Plugin(activity
 
     override fun load(webView: WebView) {
         this.webView = webView
+        // WebView inspection is for diagnostic builds only. Release APKs keep
+        // the production default and do not expose a debugging transport.
+        if (activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         // Wry installs its client before calling Plugin.load. Keep that original
         // instance as the delegate, including its IPC origin and old-WebView JS
         // initialization state, and never wrap our own wrapper a second time.

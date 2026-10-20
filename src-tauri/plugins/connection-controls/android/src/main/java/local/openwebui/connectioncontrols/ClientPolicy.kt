@@ -33,6 +33,16 @@ internal object ClientPolicy {
     fun bottomOverlap(rootBottom: Int, windowBottom: Int, inset: Int): Int =
         (rootBottom - (windowBottom - inset)).coerceAtLeast(0)
 
+    fun connectionPanelHeight(
+        contentHeight: Int,
+        availableHeight: Int,
+        maximum: Int,
+    ): Int = minOf(
+        contentHeight.coerceAtLeast(0),
+        availableHeight.coerceAtLeast(0),
+        maximum.coerceAtLeast(0),
+    )
+
     fun sameOrigin(left: String?, right: String?): Boolean = try {
         val a = URI(left ?: ""); val b = URI(right ?: "")
         fun port(uri: URI) = if (uri.port >= 0) uri.port else if (uri.scheme.equals("https", true)) 443 else 80
