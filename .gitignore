@@ -18,3 +18,4 @@ src-tauri/icons/
 src-tauri/plugins/connection-controls/android/src/main/assets/bundled-frontend/
 src-tauri/plugins/connection-controls/android/src/main/assets/.bundled-frontend-*/
 open-webui-frontend/
+open-webui-backend/

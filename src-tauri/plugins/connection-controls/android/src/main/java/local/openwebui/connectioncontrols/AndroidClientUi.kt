@@ -3,6 +3,7 @@ package local.openwebui.connectioncontrols
 import android.app.Activity
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.SurfaceTexture
 import android.graphics.Point
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -12,6 +13,9 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
 import android.content.res.Configuration
 import android.content.res.ColorStateList
+import android.media.MediaPlayer
+import android.view.Surface
+import android.view.TextureView
 import android.text.TextUtils
 import android.view.ContextThemeWrapper
 import android.widget.ImageButton
@@ -74,6 +78,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private var connectionScroll: ScrollView? = null
     private var connectionCard: LinearLayout? = null
     private var connectionImage: ImageView? = null
+    private var connectionVideo: TextureView? = null
+    private var connectionPlayer: MediaPlayer? = null
     private var connectionScrim: View? = null
     private var connectionTitle: TextView? = null
     private var connectionSubtitle: TextView? = null
@@ -415,7 +421,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
         connectionImage = ImageView(activity).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            alpha = .92f
+            // Only used as a fallback when the welcome video cannot play.
+            visibility = View.GONE
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFFB7CBE6.toInt(), 0xFFE5DCC4.toInt())
@@ -431,6 +438,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             if (bitmap != null) setImageBitmap(bitmap)
         }
         overlay.addView(connectionImage, FrameLayout.LayoutParams(-1, -1))
+        setupConnectionVideo(overlay)
         connectionScrim = View(activity)
         overlay.addView(connectionScrim, FrameLayout.LayoutParams(-1, -1))
 
@@ -692,16 +700,60 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
     }
 
+    // Play the bundled official welcome video (welcome.mp4) as the connection
+    // backdrop, matching the web experience. Falls back to the static image.
+    private fun setupConnectionVideo(overlay: FrameLayout) {
+        val videoPath = sequenceOf(
+            "bundled-frontend/assets/welcome.mp4",
+            "connection-welcome.mp4"
+        ).firstOrNull { path -> runCatching { activity.assets.openFd(path).close() }.isSuccess }
+            ?: run { showStaticBackdrop(); return }
+        val texture = TextureView(activity)
+        connectionVideo = texture
+        overlay.addView(texture, FrameLayout.LayoutParams(-1, -1))
+        texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                runCatching {
+                    val player = MediaPlayer()
+                    activity.assets.openFd(videoPath).use { afd ->
+                        player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                    }
+                    player.setSurface(Surface(surface))
+                    player.isLooping = true
+                    player.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
+                    player.setOnPreparedListener { it.start() }
+                    player.setOnErrorListener { _, _, _ ->
+                        showStaticBackdrop(); true
+                    }
+                    player.prepareAsync()
+                    connectionPlayer = player
+                }.onFailure { showStaticBackdrop() }
+            }
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
+            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                connectionPlayer?.release(); connectionPlayer = null; return true
+            }
+            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+        }
+    }
+
+    private fun showStaticBackdrop() {
+        connectionVideo?.visibility = View.GONE
+        connectionImage?.visibility = View.VISIBLE
+    }
+
     private fun styleConnectionPanel() {
         val card = connectionCard ?: return
-        connectionImage?.alpha = if (dark) .5f else .88f
+        val backdropAlpha = if (dark) .5f else .88f
+        connectionImage?.alpha = backdropAlpha
+        connectionVideo?.alpha = backdropAlpha
         connectionScrim?.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             if (dark) intArrayOf(0x72080D15, 0x9F121822.toInt(), 0xC6111318.toInt())
             else intArrayOf(0x00101820, 0x38E7EEF4, 0xA8F8FAFC.toInt())
         )
         card.background = GradientDrawable().apply {
-            setColor(Color.argb(if (dark) 194 else 206, Color.red(surface), Color.green(surface), Color.blue(surface)))
+            setColor(Color.argb(if (dark) 232 else 244, Color.red(surface), Color.green(surface), Color.blue(surface)))
             cornerRadii = floatArrayOf(
                 dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(),
                 dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat()
@@ -773,10 +825,19 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show()
     }
 
-    fun resume() { if (!disposed) { updateTheme(); immersive(activity.window); ViewCompat.requestApplyInsets(root) } }
+    fun resume() {
+        if (!disposed) {
+            updateTheme(); immersive(activity.window); ViewCompat.requestApplyInsets(root)
+            if (connectionOverlay?.visibility == View.VISIBLE) {
+                runCatching { connectionPlayer?.takeIf { !it.isPlaying }?.start() }
+            }
+        }
+    }
     fun destroy() {
         disposed = true
         confirmation?.dismiss()
+        connectionPlayer?.release()
+        connectionPlayer = null
         channel = null
         root.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
         root.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
@@ -787,6 +848,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionScroll = null
         connectionCard = null
         connectionImage = null
+        connectionVideo = null
         connectionScrim = null
         connectionTitle = null
         connectionSubtitle = null
