@@ -22,6 +22,7 @@ import android.widget.ImageButton
 import android.graphics.Rect
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
+import android.graphics.Matrix
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -418,6 +419,9 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             visibility = View.GONE
             isClickable = true
             contentDescription = tr("Server connection", "服务器连接")
+            // Opaque base so the legacy WebView connect page behind this
+            // overlay never bleeds through the translucent backdrop.
+            setBackgroundColor(Color.BLACK)
         }
         connectionImage = ImageView(activity).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -711,6 +715,20 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         val texture = TextureView(activity)
         connectionVideo = texture
         overlay.addView(texture, FrameLayout.LayoutParams(-1, -1))
+        var videoWidth = 0
+        var videoHeight = 0
+        fun applyCenterCrop() {
+            if (videoWidth <= 0 || videoHeight <= 0 || texture.width <= 0 || texture.height <= 0) return
+            val viewW = texture.width.toFloat()
+            val viewH = texture.height.toFloat()
+            val scale = max(viewW / videoWidth, viewH / videoHeight)
+            val scaledW = videoWidth * scale
+            val scaledH = videoHeight * scale
+            val matrix = Matrix()
+            matrix.setScale(scale, scale)
+            matrix.postTranslate((viewW - scaledW) / 2f, (viewH - scaledH) / 2f)
+            texture.setTransform(matrix)
+        }
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                 runCatching {
@@ -720,8 +738,10 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                     }
                     player.setSurface(Surface(surface))
                     player.isLooping = true
-                    player.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
-                    player.setOnPreparedListener { it.start() }
+                    player.setOnVideoSizeChangedListener { _, vw, vh ->
+                        videoWidth = vw; videoHeight = vh; applyCenterCrop()
+                    }
+                    player.setOnPreparedListener { it.start(); applyCenterCrop() }
                     player.setOnErrorListener { _, _, _ ->
                         showStaticBackdrop(); true
                     }
@@ -729,7 +749,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                     connectionPlayer = player
                 }.onFailure { showStaticBackdrop() }
             }
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) { applyCenterCrop() }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                 connectionPlayer?.release(); connectionPlayer = null; return true
             }
