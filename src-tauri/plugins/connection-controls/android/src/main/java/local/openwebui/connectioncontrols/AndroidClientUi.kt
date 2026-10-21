@@ -16,6 +16,7 @@ import android.content.res.ColorStateList
 import android.media.MediaPlayer
 import android.view.Surface
 import android.view.TextureView
+import android.view.MotionEvent
 import android.text.TextUtils
 import android.view.ContextThemeWrapper
 import android.widget.ImageButton
@@ -445,6 +446,18 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         setupConnectionVideo(overlay)
         connectionScrim = View(activity)
         overlay.addView(connectionScrim, FrameLayout.LayoutParams(-1, -1))
+        val framingHint = TextView(activity).apply {
+            text = tr("← Swipe the background to adjust →", "← 左右滑动背景调整画面 →")
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                setColor(0x66000000); cornerRadius = dp(16).toFloat()
+            }
+        }
+        overlay.addView(framingHint, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = dp(18)
+        })
 
         val card = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -717,20 +730,51 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         overlay.addView(texture, FrameLayout.LayoutParams(-1, -1))
         var videoWidth = 0
         var videoHeight = 0
+        val framing = activity.getSharedPreferences("connection-backdrop", android.content.Context.MODE_PRIVATE)
+        fun orientationKey() = if (texture.height >= texture.width) "portrait" else "landscape"
+        var focus = framing.getFloat("portrait", .5f)
         fun applyCenterCrop() {
-            if (videoWidth <= 0 || videoHeight <= 0 || texture.width <= 0 || texture.height <= 0) return
-            val viewW = texture.width.toFloat()
-            val viewH = texture.height.toFloat()
-            val scale = max(viewW / videoWidth, viewH / videoHeight)
-            val scaledW = videoWidth * scale
-            val scaledH = videoHeight * scale
+            val fit = connectionBackdropTransform(
+                texture.width.toFloat(), texture.height.toFloat(), videoWidth, videoHeight, focus
+            ) ?: return
             val matrix = Matrix()
-            matrix.setScale(scale, scale)
-            matrix.postTranslate((viewW - scaledW) / 2f, (viewH - scaledH) / 2f)
+            matrix.setScale(fit.scaleX, fit.scaleY)
+            matrix.postTranslate(fit.translateX, fit.translateY)
             texture.setTransform(matrix)
+        }
+        var startX = 0f
+        var startY = 0f
+        var startFocus = .5f
+        var horizontal = false
+        // This listener receives only the exposed background. The form and
+        // recent-server list continue to own their input/scroll gestures.
+        overlay.setOnTouchListener { view, event ->
+            val fit = connectionBackdropTransform(
+                texture.width.toFloat(), texture.height.toFloat(), videoWidth, videoHeight, focus
+            )
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.x; startY = event.y; startFocus = focus; horizontal = false
+                }
+                MotionEvent.ACTION_MOVE -> if (fit != null && fit.overflowX > 0) {
+                    val dx = event.x - startX
+                    if (kotlin.math.abs(dx) > dp(8) && kotlin.math.abs(dx) > kotlin.math.abs(event.y - startY)) horizontal = true
+                    if (horizontal) {
+                        focus = (startFocus - dx / fit.overflowX).coerceIn(0f, 1f)
+                        applyCenterCrop()
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (horizontal) framing.edit().putFloat(orientationKey(), focus).apply()
+                    else view.performClick()
+                }
+                MotionEvent.ACTION_CANCEL -> { focus = startFocus; applyCenterCrop() }
+            }
+            true
         }
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                focus = framing.getFloat(orientationKey(), .5f)
                 runCatching {
                     val player = MediaPlayer()
                     activity.assets.openFd(videoPath).use { afd ->
@@ -749,7 +793,10 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                     connectionPlayer = player
                 }.onFailure { showStaticBackdrop() }
             }
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) { applyCenterCrop() }
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                focus = framing.getFloat(orientationKey(), .5f)
+                applyCenterCrop()
+            }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                 connectionPlayer?.release(); connectionPlayer = null; return true
             }
@@ -764,13 +811,13 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
 
     private fun styleConnectionPanel() {
         val card = connectionCard ?: return
-        val backdropAlpha = if (dark) .5f else .88f
+        val backdropAlpha = 1f
         connectionImage?.alpha = backdropAlpha
         connectionVideo?.alpha = backdropAlpha
         connectionScrim?.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            if (dark) intArrayOf(0x72080D15, 0x9F121822.toInt(), 0xC6111318.toInt())
-            else intArrayOf(0x00101820, 0x38E7EEF4, 0xA8F8FAFC.toInt())
+            if (dark) intArrayOf(0x18080D15, 0x30121822, 0x66111318)
+            else intArrayOf(0x00101820, 0x18E7EEF4, 0x38F8FAFC)
         )
         card.background = GradientDrawable().apply {
             setColor(Color.argb(if (dark) 232 else 244, Color.red(surface), Color.green(surface), Color.blue(surface)))
