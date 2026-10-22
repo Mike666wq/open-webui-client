@@ -974,12 +974,15 @@ def navigate_fixture_route(cdp, path, expected_frontend_sha):
 
 
 def previous_change_log(output):
-    logcat = subprocess.run(
-        ["adb", "logcat", "-b", "crash", "-d", "-t", "400"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    ).stdout
+    try:
+        logcat = subprocess.run(
+            ["adb", "logcat", "-b", "crash", "-d", "-t", "400"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as error:
+        logcat = f"Crash log unavailable after the device connection closed: {error}"
     (output / "crash-logcat.txt").write_text(logcat + "\n", encoding="utf-8")
 
 
@@ -990,7 +993,7 @@ def save_wallpaper_state(output, cdp, name, expected_sha):
     (output / f"{name}.json").write_text(
         json.dumps(payload, indent=2) + "\n", encoding="utf-8"
     )
-    png(output / f"{name}.png")
+    cdp.screenshot(output / f"{name}.png")
     return payload
 
 
@@ -1162,6 +1165,23 @@ def assert_connection_panel(
     }
 
 
+def connection_focus_percent(output):
+    gesture = find_any(
+        output,
+        ["Pan welcome wallpaper", "横向调整欢迎背景"],
+        predicate=lambda node: any(
+            value.startswith(("Pan welcome wallpaper", "横向调整欢迎背景"))
+            for value in (node.get("content-desc", ""),)
+        ),
+    )
+    match = re.search(r"(\d+)%", gesture.get("content-desc", ""))
+    if not match:
+        raise DiagnosisFailure(
+            f"Wallpaper gesture did not expose its current focus: {gesture.attrib}"
+        )
+    return int(match.group(1))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
@@ -1196,6 +1216,62 @@ def main():
             output, label="default connection page", allow_scroll=False
         )
         png(output / "connection-empty.png")
+
+        expanded_card = bounds(
+            find_any(
+                output,
+                ["Connection form", "连接表单"],
+                predicate=lambda node: node.get("content-desc") in ("Connection form", "连接表单"),
+            )
+        )
+        tap_any(output, ["Collapse connection settings", "收起连接设置"])
+        wait_for_control(output, ["Expand connection settings", "展开连接设置"], timeout=20)
+        time.sleep(0.4)
+        collapsed_card = bounds(
+            find_any(
+                output,
+                ["Connection form", "连接表单"],
+                predicate=lambda node: node.get("content-desc") in ("Connection form", "连接表单"),
+            )
+        )
+        if collapsed_card[3] - collapsed_card[1] >= expanded_card[3] - expanded_card[1]:
+            raise DiagnosisFailure(
+                "Collapsing the native connection sheet did not reduce its height: "
+                f"{expanded_card} -> {collapsed_card}"
+            )
+        tap_any(output, ["Expand connection settings", "展开连接设置"])
+        wait_for_control(output, ["Server address", "服务地址"], timeout=20)
+        time.sleep(0.4)
+        restored_card = bounds(
+            find_any(
+                output,
+                ["Connection form", "连接表单"],
+                predicate=lambda node: node.get("content-desc") in ("Connection form", "连接表单"),
+            )
+        )
+        if restored_card[3] - restored_card[1] <= collapsed_card[3] - collapsed_card[1]:
+            raise DiagnosisFailure(
+                "Expanding the native connection sheet did not restore its content: "
+                f"{collapsed_card} -> {restored_card}"
+            )
+
+        time.sleep(1)
+        width, _, _ = screen_metrics()
+        swipe_y = max(180, restored_card[1] // 2)
+        focus_sequence = [connection_focus_percent(output)]
+        for _ in range(3):
+            shell(
+                f"input swipe {int(width * 0.7)} {swipe_y} "
+                f"{int(width * 0.45)} {swipe_y} 350"
+            )
+            time.sleep(0.45)
+            focus_sequence.append(connection_focus_percent(output))
+        if any(right <= left for left, right in zip(focus_sequence, focus_sequence[1:])):
+            raise DiagnosisFailure(
+                "Repeated native wallpaper swipes did not keep moving the focus: "
+                f"{focus_sequence}"
+            )
+
         address = replace_text(
             output,
             ["Server address", "服务地址"],
@@ -1223,6 +1299,12 @@ def main():
             "empty": connection_empty,
             "keyboard": keyboard_panel,
             "addressBounds": bounds(address),
+            "collapse": {
+                "expanded": expanded_card,
+                "collapsed": collapsed_card,
+                "restored": restored_card,
+            },
+            "wallpaperFocusSequence": focus_sequence,
         }
         (output / "connection-geometry.json").write_text(
             json.dumps(connection_evidence, indent=2) + "\n", encoding="utf-8"
@@ -1245,7 +1327,7 @@ def main():
         (output / "chat-geometry.json").write_text(
             json.dumps(chat_metrics, indent=2) + "\n", encoding="utf-8"
         )
-        png(output / "chat-real-frontend.png")
+        cdp.screenshot(output / "chat-real-frontend.png")
 
         open_settings(cdp)
         open_appearance_tab(cdp)
@@ -1275,7 +1357,7 @@ def main():
         (output / "settings-geometry.json").write_text(
             json.dumps(settings_geometry, indent=2) + "\n", encoding="utf-8"
         )
-        png(output / "settings-real-frontend.png")
+        cdp.screenshot(output / "settings-real-frontend.png")
 
         editor_touch = open_appearance_editor(
             cdp,
@@ -1295,7 +1377,7 @@ def main():
             + "\n",
             encoding="utf-8",
         )
-        png(output / "editor-bottom.png")
+        cdp.screenshot(output / "editor-bottom.png")
 
         baseline = wallpaper_probe(cdp)
         if baseline.get("kind") != "gradient":
@@ -1307,7 +1389,7 @@ def main():
             + "\n",
             encoding="utf-8",
         )
-        png(output / "wallpaper-preview.png")
+        cdp.screenshot(output / "wallpaper-preview.png")
         click_editor_action(cdp, ["Cancel", "取消"])
         cancelled = wait_for_wallpaper(
             cdp, "gradient", expected_image=baseline.get("image")
@@ -1419,7 +1501,7 @@ def main():
             allow_scroll=True,
             connect_labels=["Switch server", "切换服务"],
         )
-        png(output / "font_scale.png")
+        cdp.screenshot(output / "font_scale.png")
         window_evidence(output, "font_scale")
         (output / "font-scale.json").write_text(
             json.dumps(large_font_panel, indent=2) + "\n", encoding="utf-8"
@@ -1445,7 +1527,10 @@ def main():
         print("ANDROID_BUNDLED_FRONTEND_DIAGNOSE_PASS")
     except Exception:
         try:
-            png(output / "failure.png")
+            if cdp is not None:
+                cdp.screenshot(output / "failure.png")
+            else:
+                png(output / "failure.png")
         except Exception:
             pass
         try:
@@ -1460,8 +1545,10 @@ def main():
         shell("settings put system accelerometer_rotation 1", check=False)
         if cdp is not None:
             cdp.close()
-        previous_change_log(output)
-        adb("forward", "--remove", f"tcp:{CDP_PORT}", check=False)
+        try:
+            previous_change_log(output)
+        finally:
+            adb("forward", "--remove", f"tcp:{CDP_PORT}", check=False)
 
 
 if __name__ == "__main__":

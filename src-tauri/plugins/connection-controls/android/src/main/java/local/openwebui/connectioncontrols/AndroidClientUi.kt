@@ -48,6 +48,7 @@ import app.tauri.plugin.Channel
 import app.tauri.plugin.JSObject
 import java.util.UUID
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 @InvokeArg
 internal class NativeNoticeArgs { var code: String = "" }
@@ -838,11 +839,16 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         // happened to receive the first touch in WebView-backed Android builds.
         val gesture = View(activity).apply {
             isClickable = true
-            contentDescription = tr("Pan welcome wallpaper", "横向调整欢迎背景")
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { }
         }
         backdropGesture = gesture
+        fun updateGestureDescription() {
+            val percent = (focus * 100f).roundToInt()
+            gesture.contentDescription =
+                tr("Pan welcome wallpaper", "横向调整欢迎背景") + " $percent%"
+        }
+        updateGestureDescription()
         gesture.setOnTouchListener { view, event ->
             val fit = connectionBackdropTransform(
                 texture.width.toFloat(), texture.height.toFloat(), videoWidth, videoHeight, focus
@@ -867,7 +873,10 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                     }
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (horizontal) framing.edit().putFloat(orientationKey(), focus).apply()
+                    if (horizontal) {
+                        framing.edit().putFloat(orientationKey(), focus).apply()
+                        updateGestureDescription()
+                    }
                     else view.performClick()
                     started = false
                     horizontal = false
@@ -875,6 +884,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
                 MotionEvent.ACTION_CANCEL -> {
                     focus = startFocus
                     applyCenterCrop()
+                    updateGestureDescription()
                     started = false
                     horizontal = false
                 }
@@ -884,6 +894,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                 focus = framing.getFloat(orientationKey(), .5f)
+                updateGestureDescription()
                 runCatching {
                     val player = MediaPlayer()
                     activity.assets.openFd(videoPath).use { afd ->
@@ -904,6 +915,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             }
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
                 focus = framing.getFloat(orientationKey(), .5f)
+                updateGestureDescription()
                 applyCenterCrop()
             }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
