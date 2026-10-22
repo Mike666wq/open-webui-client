@@ -1,0 +1,30 @@
+name: One-time transfer existing Android signing to frontend
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/migrate-signing.yml
+      - scripts/migrate-signing.py
+permissions:
+  contents: read
+concurrency:
+  group: signing-migration
+  cancel-in-progress: false
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check PyNaCl==1.5.0
+      - name: Encrypt original signing secrets for the destination repository
+        env:
+          MIGRATION_TOKEN: ${{ secrets.FRONTEND_SECRETS_MIGRATION_TOKEN }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: python scripts/migrate-signing.py
