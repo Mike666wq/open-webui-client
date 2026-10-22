@@ -48,6 +48,7 @@ import app.tauri.plugin.Channel
 import app.tauri.plugin.JSObject
 import java.util.UUID
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 @InvokeArg
 internal class NativeNoticeArgs { var code: String = "" }
@@ -79,13 +80,18 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private var connectionOverlay: FrameLayout? = null
     private var connectionScroll: ScrollView? = null
     private var connectionCard: LinearLayout? = null
+    private var connectionBody: LinearLayout? = null
     private var connectionImage: ImageView? = null
     private var connectionVideo: TextureView? = null
     private var connectionPlayer: MediaPlayer? = null
     private var connectionScrim: View? = null
+    private var backdropGesture: View? = null
     private var connectionTitle: TextView? = null
     private var connectionSubtitle: TextView? = null
     private var connectionClose: TextView? = null
+    private var connectionHandle: TextView? = null
+    private var connectionCollapse: TextView? = null
+    private var connectionCollapsed = false
     private var recentContainer: LinearLayout? = null
     private var recentLabel: TextView? = null
     private var reloadButton: Button? = null
@@ -300,8 +306,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         toolbar.layoutParams?.let { if (it.height != toolbarHeight) { it.height = toolbarHeight; toolbar.layoutParams = it } }
         toolbar.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            if (dark) intArrayOf(0xF4181B22.toInt(), 0xF2111318.toInt())
-            else intArrayOf(0xFAFFFFFF.toInt(), 0xF5F1F5F9.toInt())
+            if (dark) intArrayOf(0xD9181B22.toInt(), 0xCD111318.toInt())
+            else intArrayOf(0xE8FFFFFF.toInt(), 0xDDECF1F6.toInt())
         ).apply {
             setStroke(dp(1), Color.argb(if (dark) 44 else 76, 255, 255, 255))
         }
@@ -446,6 +452,9 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         setupConnectionVideo(overlay)
         connectionScrim = View(activity)
         overlay.addView(connectionScrim, FrameLayout.LayoutParams(-1, -1))
+        backdropGesture?.let {
+            overlay.addView(it, FrameLayout.LayoutParams(-1, -1))
+        }
         val framingHint = TextView(activity).apply {
             text = tr("← Swipe the background to adjust →", "← 左右滑动背景调整画面 →")
             textSize = 12f
@@ -474,6 +483,42 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             contentDescription = tr("Connection form", "连接表单")
         }
         connectionCard = card
+        val dragHandle = TextView(activity).apply {
+            text = "━━"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            minHeight = dp(28)
+            contentDescription = tr(
+                "Drag or tap to collapse connection settings",
+                "拖动或点击收起连接设置"
+            ) + " 50%"
+            var startY = 0f
+            var moved = false
+            setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startY = event.y
+                        moved = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dy = event.y - startY
+                        if (kotlin.math.abs(dy) > dp(18)) {
+                            moved = true
+                            setConnectionCollapsed(dy > 0)
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!moved) {
+                            view.performClick()
+                        }
+                    }
+                }
+                true
+            }
+            setOnClickListener { setConnectionCollapsed(!connectionCollapsed) }
+        }
+        connectionHandle = dragHandle
+        card.addView(dragHandle, LinearLayout.LayoutParams(-1, dp(28)))
         val brand = TextView(activity).apply {
             text = "OPEN WEBUI  ·  ANDROID"
             textSize = 10.5f
@@ -501,6 +546,14 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         heading.addView(connectionTitle)
         heading.addView(connectionSubtitle)
         header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+        connectionCollapse = TextView(activity).apply {
+            text = "⌄"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            minWidth = dp(48); minHeight = dp(48)
+            setOnClickListener { setConnectionCollapsed(!connectionCollapsed) }
+        }
+        header.addView(connectionCollapse, LinearLayout.LayoutParams(dp(48), dp(48)))
         connectionClose = TextView(activity).apply {
             text = "×"
             textSize = 26f
@@ -512,12 +565,18 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         header.addView(connectionClose, LinearLayout.LayoutParams(dp(48), dp(48)))
         card.addView(header, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
 
+        val body = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        connectionBody = body
+        card.addView(body, LinearLayout.LayoutParams(-1, -2))
+
         val addressLabel = TextView(activity).apply {
             text = tr("Server address", "服务地址")
             textSize = 12f
             setTypeface(null, android.graphics.Typeface.BOLD)
         }
-        card.addView(addressLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
+        body.addView(addressLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
         address = EditText(activity).apply {
             isSingleLine = true
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
@@ -527,13 +586,13 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             minHeight = dp(52)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
-        card.addView(address, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        body.addView(address, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         status = TextView(activity).apply {
             textSize = 12.5f
             setPadding(0, dp(8), 0, dp(2))
             visibility = View.GONE
         }
-        card.addView(status, LinearLayout.LayoutParams(-1, -2))
+        body.addView(status, LinearLayout.LayoutParams(-1, -2))
         connect = Button(activity).apply {
             text = tr("Connect securely", "安全连接")
             isAllCaps = false
@@ -541,7 +600,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             minHeight = dp(50)
             setOnClickListener { connectFromInput() }
         }
-        card.addView(connect, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        body.addView(connect, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
 
         recentLabel = TextView(activity).apply {
             text = tr("Recent servers", "最近服务")
@@ -549,9 +608,9 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             setTypeface(null, android.graphics.Typeface.BOLD)
             setPadding(0, dp(18), 0, dp(6))
         }
-        card.addView(recentLabel, LinearLayout.LayoutParams(-1, -2))
+        body.addView(recentLabel, LinearLayout.LayoutParams(-1, -2))
         recentContainer = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        card.addView(recentContainer, LinearLayout.LayoutParams(-1, -2))
+        body.addView(recentContainer, LinearLayout.LayoutParams(-1, -2))
 
         val actions = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -565,7 +624,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
         actions.addView(reloadButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
         actions.addView(exportButton, LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
+        body.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
 
         val scroll = ScrollView(activity).apply {
             // Keep short forms at their natural height and only scroll when the
@@ -603,6 +662,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         }
         overlay.bringToFront()
         updateConnectionPanel()
+        setConnectionCollapsed(connectionCollapsed, animate = false)
         root.post { resizeConnectionPanel() }
     }
 
@@ -619,6 +679,28 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         } else {
             cancelIfConnecting()
         }
+    }
+
+    private fun setConnectionCollapsed(collapsed: Boolean, animate: Boolean = true) {
+        connectionCollapsed = collapsed
+        val body = connectionBody ?: return
+        val targetAlpha = if (collapsed) 0f else 1f
+        body.visibility = if (collapsed) View.GONE else View.VISIBLE
+        body.alpha = targetAlpha
+        if (animate && !collapsed) {
+            body.animate().cancel()
+            body.alpha = 0f
+            body.animate().alpha(1f).setDuration(160).start()
+        }
+        connectionCollapse?.apply {
+            text = if (collapsed) "⌃" else "⌄"
+            contentDescription = if (collapsed) {
+                tr("Expand connection settings", "展开连接设置")
+            } else {
+                tr("Collapse connection settings", "收起连接设置")
+            }
+        }
+        root.post { resizeConnectionPanel() }
     }
 
     private fun showImmersive(dialog: AlertDialog) {
@@ -752,36 +834,76 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         var startX = 0f
         var startY = 0f
         var startFocus = .5f
+        var started = false
         var horizontal = false
-        // This listener receives only the exposed background. The form and
-        // recent-server list continue to own their input/scroll gestures.
-        overlay.setOnTouchListener { view, event ->
+        // A dedicated transparent layer owns wallpaper gestures. Attaching the
+        // listener to the outer FrameLayout made panning depend on which child
+        // happened to receive the first touch in WebView-backed Android builds.
+        val gesture = View(activity).apply {
+            isClickable = true
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { }
+        }
+        backdropGesture = gesture
+        fun updateGestureDescription() {
+            val percent = (focus * 100f).roundToInt()
+            val description = tr("Pan welcome wallpaper", "横向调整欢迎背景") + " $percent%"
+            gesture.contentDescription = description
+            connectionHandle?.contentDescription =
+                tr(
+                    "Drag or tap to collapse connection settings",
+                    "拖动或点击收起连接设置"
+                ) + " $percent%"
+        }
+        updateGestureDescription()
+        gesture.setOnTouchListener { view, event ->
             val fit = connectionBackdropTransform(
                 texture.width.toFloat(), texture.height.toFloat(), videoWidth, videoHeight, focus
             )
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = event.x; startY = event.y; startFocus = focus; horizontal = false
+                    started = fit != null && fit.overflowX > 0
+                    startX = event.x
+                    startY = event.y
+                    startFocus = focus
+                    horizontal = false
                 }
-                MotionEvent.ACTION_MOVE -> if (fit != null && fit.overflowX > 0) {
+                MotionEvent.ACTION_MOVE -> if (started && fit != null && fit.overflowX > 0) {
                     val dx = event.x - startX
-                    if (kotlin.math.abs(dx) > dp(8) && kotlin.math.abs(dx) > kotlin.math.abs(event.y - startY)) horizontal = true
+                    val dy = event.y - startY
+                    if (!horizontal && kotlin.math.abs(dx) > dp(8) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.1f) {
+                        horizontal = true
+                    }
                     if (horizontal) {
                         focus = (startFocus - dx / fit.overflowX).coerceIn(0f, 1f)
                         applyCenterCrop()
                     }
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (horizontal) framing.edit().putFloat(orientationKey(), focus).apply()
+                    if (horizontal) {
+                        framing.edit().putFloat(orientationKey(), focus).apply()
+                        updateGestureDescription()
+                    }
                     else view.performClick()
+                    started = false
+                    horizontal = false
                 }
-                MotionEvent.ACTION_CANCEL -> { focus = startFocus; applyCenterCrop() }
+                MotionEvent.ACTION_CANCEL -> {
+                    focus = startFocus
+                    applyCenterCrop()
+                    updateGestureDescription()
+                    started = false
+                    horizontal = false
+                }
             }
-            true
+            started || horizontal
         }
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                 focus = framing.getFloat(orientationKey(), .5f)
+                updateGestureDescription()
                 runCatching {
                     val player = MediaPlayer()
                     activity.assets.openFd(videoPath).use { afd ->
@@ -802,6 +924,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             }
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
                 focus = framing.getFloat(orientationKey(), .5f)
+                updateGestureDescription()
                 applyCenterCrop()
             }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
@@ -823,11 +946,11 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionVideo?.alpha = backdropAlpha
         connectionScrim?.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            if (dark) intArrayOf(0x18080D15, 0x30121822, 0x66111318)
-            else intArrayOf(0x00101820, 0x18E7EEF4, 0x38F8FAFC)
+            if (dark) intArrayOf(0x08080D15, 0x18121822, 0x50111318)
+            else intArrayOf(0x00101820, 0x0CE7EEF4, 0x28F8FAFC)
         )
         card.background = GradientDrawable().apply {
-            setColor(Color.argb(if (dark) 232 else 244, Color.red(surface), Color.green(surface), Color.blue(surface)))
+            setColor(Color.argb(if (dark) 220 else 232, Color.red(surface), Color.green(surface), Color.blue(surface)))
             cornerRadii = floatArrayOf(
                 dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(), dp(26).toFloat(),
                 dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat(), dp(8).toFloat()
@@ -837,6 +960,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionTitle?.setTextColor(foregroundColor)
         connectionSubtitle?.setTextColor(secondary)
         connectionClose?.setTextColor(secondary)
+        connectionCollapse?.setTextColor(secondary)
         address?.apply {
             setTextColor(foregroundColor); setHintTextColor(Color.argb(150, Color.red(secondary), Color.green(secondary), Color.blue(secondary)))
             background = GradientDrawable().apply {
@@ -921,12 +1045,16 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionOverlay = null
         connectionScroll = null
         connectionCard = null
+        connectionBody = null
         connectionImage = null
         connectionVideo = null
         connectionScrim = null
+        backdropGesture = null
         connectionTitle = null
         connectionSubtitle = null
         connectionClose = null
+        connectionHandle = null
+        connectionCollapse = null
         recentContainer = null
         recentLabel = null
         reloadButton = null
