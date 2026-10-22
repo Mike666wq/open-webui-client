@@ -89,6 +89,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
     private var connectionTitle: TextView? = null
     private var connectionSubtitle: TextView? = null
     private var connectionClose: TextView? = null
+    private var connectionHandle: TextView? = null
     private var connectionCollapse: TextView? = null
     private var connectionCollapsed = false
     private var recentContainer: LinearLayout? = null
@@ -490,7 +491,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             contentDescription = tr(
                 "Drag or tap to collapse connection settings",
                 "拖动或点击收起连接设置"
-            )
+            ) + " 50%"
             var startY = 0f
             var moved = false
             setOnTouchListener { view, event ->
@@ -516,6 +517,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
             }
             setOnClickListener { setConnectionCollapsed(!connectionCollapsed) }
         }
+        connectionHandle = dragHandle
         card.addView(dragHandle, LinearLayout.LayoutParams(-1, dp(28)))
         val brand = TextView(activity).apply {
             text = "OPEN WEBUI  ·  ANDROID"
@@ -847,8 +849,13 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         backdropGesture = gesture
         fun updateGestureDescription() {
             val percent = (focus * 100f).roundToInt()
-            gesture.contentDescription =
-                tr("Pan welcome wallpaper", "横向调整欢迎背景") + " $percent%"
+            val description = tr("Pan welcome wallpaper", "横向调整欢迎背景") + " $percent%"
+            gesture.contentDescription = description
+            connectionHandle?.contentDescription =
+                tr(
+                    "Drag or tap to collapse connection settings",
+                    "拖动或点击收起连接设置"
+                ) + " $percent%"
         }
         updateGestureDescription()
         gesture.setOnTouchListener { view, event ->
@@ -1046,6 +1053,7 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         connectionTitle = null
         connectionSubtitle = null
         connectionClose = null
+        connectionHandle = null
         connectionCollapse = null
         recentContainer = null
         recentLabel = null

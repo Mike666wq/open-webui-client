@@ -1195,9 +1195,17 @@ def assert_connection_panel(
 def connection_focus_percent(output):
     gesture = find_any(
         output,
-        ["Pan welcome wallpaper", "横向调整欢迎背景"],
+        [
+            "Drag or tap to collapse connection settings",
+            "拖动或点击收起连接设置",
+        ],
         predicate=lambda node: any(
-            value.startswith(("Pan welcome wallpaper", "横向调整欢迎背景"))
+            value.startswith(
+                (
+                    "Drag or tap to collapse connection settings",
+                    "拖动或点击收起连接设置",
+                )
+            )
             for value in (node.get("content-desc", ""),)
         ),
     )
