@@ -77,7 +77,7 @@ def find(output, label, *, timeout=30, predicate=None):
                         node.get("text", "").casefold(),
                         node.get("content-desc", "").casefold(),
                     )
-                    if any(candidate.casefold() in values for candidate in labels) and (
+                    if any(candidate.casefold() in value for candidate in labels for value in values) and (
                         predicate is None or predicate(node)
                     ):
                         match = re.findall(r"-?\d+", node.get("bounds", ""))
