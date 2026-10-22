@@ -1,3 +1,21 @@
+# Client repository retired
+
+客户端源码、自动检查和签名 APK 发布已迁入 [open-webui-frontend/apps/client](https://github.com/Mike666wq/open-webui-frontend/tree/main/apps/client)。
+日常只维护 frontend 与 backend 两个仓库，不再向本仓库提交新功能。
+
+迁移后首个正式 APK：[v0.2.33](https://github.com/Mike666wq/open-webui-frontend/releases/tag/v0.2.33)，
+[构建验证](https://github.com/Mike666wq/open-webui-frontend/actions/runs/39760517628) 已通过原生测试、原签名和包完整性门禁。
+应用标识与签名密钥保持不变，versionCode 200031 高于旧版 100026。
+
+本仓库保留旧 Git 历史、源码与 v0.2.32 及更早的 Releases。旧工作流已停用；需要复查迁移前配置，请查看
+[迁移前源码快照](https://github.com/Mike666wq/open-webui-client/tree/621b666b674da5118ae2b1e28e19efce0eef6ba4)。
+原签名 Secret 暂保留作为恢复来源。FRONTEND_SECRETS_MIGRATION_TOKEN 已完成用途，应从本仓库移除；
+若 Token 专用于此次迁移，也应在个人设置撤销。不要删除仍供其他用途使用的 Token。
+
+---
+
+以下为迁移前说明，路径和工作流以以上新入口为准。
+
 > 三仓库共同进度见 [当前进度](docs/PROJECT_STATUS.md)，操作方式见 [GitHub 构建与人工验收](docs/CLOUD_DEVELOPMENT.md)。Codespaces 当前暂停使用，尚未验收可用。
 
 # Open WebUI Client
