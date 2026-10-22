@@ -1,3 +1,5 @@
+> 本文保留历史签名与诊断说明。当前构建入口、串联流程、versionCode 和重试方式以 [云端开发说明](CLOUD_DEVELOPMENT.md)、仓库 README 与实际 workflow 为准；下文旧 build.yml / candidate / 三端发布描述不再适用。
+
 # 当前发布流程
 
 PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android ARM64 APK 构建、单元测试、签名及包完整性校验 → 发布。

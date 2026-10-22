@@ -30,6 +30,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr imagemagick
           python3 scripts/android-picker-ocr.py --image scripts/fixtures/android-save-api29.png --evidence "$RUNNER_TEMP/save-ocr-regression"
+      - name: Test frontend synchronization and release ordering
+        run: python3 -m unittest discover -s scripts -p test_sync_frontend.py -v
       - name: Run Node tests
         run: npm test
       - name: Build frontend
