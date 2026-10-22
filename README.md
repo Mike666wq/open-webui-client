@@ -32,7 +32,7 @@ Android 默认隐藏顶部状态栏，边缘滑动可临时显示；底部系统
 
 ## 构建
 
-PR 执行 **Pull request quick checks**，检查源码、前端构建、版本、工作流语法及固定截图回归，不构建 APK、不读取发布密钥。合并 main 后，**Android APK release** 自动递增 patch，固定源码 SHA，只构建 Android ARM64 签名 APK，执行原生单元测试、签名及包元数据校验后公开 Release。发布不构建 x86_64 测试包、不启动模拟器、不等待完整交互或冷启动观察。仅文档修改不发版。正在发布的版本不会被取消；等待中的过期提交跳过，最新 main 最终验收。需要恢复时优先使用 Actions 的 Re-run failed jobs；同一次运行保留版本、versionCode 和已构建 APK，产物及校验清单保留14天。自动候选包和独立 push 诊断已取消；手动 **Android emulator startup diagnosis** 仍可选择当前源码或基线。模拟器通过不代表 HyperOS 真机验收完成。本次安卓修改不会触发 Windows 或 macOS 构建；桌面历史版本可继续从既有 Release 下载。
+PR 执行 **Pull request quick checks**，检查源码、前端构建、版本、工作流语法及固定截图回归，不构建 APK、不读取发布密钥。合并 main 后，**Android APK release** 自动递增 patch，固定源码 SHA，只构建 Android ARM64 签名 APK，执行原生单元测试、签名及包元数据校验后公开 Release。发布不构建 x86_64 测试包、不启动模拟器、不等待完整交互或冷启动观察。当前 main 更新经前端同步后触发构建。正在发布的版本不会被取消；等待中的过期提交跳过，最新 main 最终验收。需要恢复时优先使用 Actions 的 Re-run failed jobs；同一次运行保留版本、versionCode 和已构建 APK，产物及校验清单保留14天。自动候选包和独立 push 诊断已取消；手动 **Android emulator startup diagnosis** 仍可选择当前源码或基线。模拟器通过不代表 HyperOS 真机验收完成。本次安卓修改不会触发 Windows 或 macOS 构建；桌面历史版本可继续从既有 Release 下载。
 
 首次准备 Android 签名时，先在仓库添加高熵 `ANDROID_KEYSTORE_PASSWORD` secret，再从 `main` 手动运行 **Initialize Android release keystore**。下载一天后过期的密码保护 PKCS#12 artifact，私下备份，并立即删除该 artifact 和初始化 run；该 artifact 本身不是私密的。用 Windows PowerShell 将备份 keystore 编码到剪贴板，然后只需再设置 `ANDROID_KEYSTORE_BASE64` secret。固定别名是 `openwebui-client`，key password 复用 `ANDROID_KEYSTORE_PASSWORD`，不需要另外两个冗余 secret。不要把密码或 keystore 发到聊天或提交到仓库。初始化只需运行一次；已有 Base64 keystore 时 workflow 会拒绝重生成。
 
