@@ -839,6 +839,8 @@ internal class AndroidClientUi(private val activity: Activity, private val webVi
         // happened to receive the first touch in WebView-backed Android builds.
         val gesture = View(activity).apply {
             isClickable = true
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { }
         }

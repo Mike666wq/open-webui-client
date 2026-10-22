@@ -166,6 +166,33 @@ def window_evidence(output, name):
     return text
 
 
+def failure_device_evidence(output):
+    """Capture process and accessibility state before the emulator is removed."""
+    logcat = shell(
+        "logcat -d -b system -b main -t 2000",
+        check=False,
+        timeout=20,
+    )
+    (output / "failure-logcat.txt").write_text(logcat + "\n", encoding="utf-8")
+    activity = shell("dumpsys activity lastanr", check=False, timeout=20)
+    (output / "failure-activity.txt").write_text(activity + "\n", encoding="utf-8")
+    remote = "/sdcard/bundled-frontend-failure.xml"
+    shell("rm -f " + remote, check=False, timeout=15)
+    command(
+        ["adb", "shell", "uiautomator", "dump", remote],
+        check=False,
+        timeout=25,
+    )
+    hierarchy = command(
+        ["adb", "exec-out", "cat", remote],
+        check=False,
+        timeout=20,
+    ).stdout
+    (output / "failure-uiautomator.xml").write_text(
+        hierarchy + "\n", encoding="utf-8"
+    )
+
+
 def keyboard_visible():
     dump = shell("dumpsys input_method", check=False)
     return bool(re.search(r"mInputShown\s*=\s*true|mInputShown=true", dump))
@@ -1531,6 +1558,10 @@ def main():
                 cdp.screenshot(output / "failure.png")
             else:
                 png(output / "failure.png")
+        except Exception:
+            pass
+        try:
+            failure_device_evidence(output)
         except Exception:
             pass
         try:
