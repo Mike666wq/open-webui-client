@@ -1,33 +1,40 @@
-> 本文保留历史签名与诊断说明。当前构建入口、串联流程、versionCode 和重试方式以 [云端开发说明](CLOUD_DEVELOPMENT.md)、仓库 README 与实际 workflow 为准；下文旧 build.yml / candidate / 三端发布描述不再适用。
+# GitHub Actions 与 Android 发布
 
-# 当前发布流程
+共同进度见 [PROJECT_STATUS.md](PROJECT_STATUS.md)，跨仓库步骤见 [CLOUD_DEVELOPMENT.md](CLOUD_DEVELOPMENT.md)。本文仅描述当前配置；旧 build.yml、candidate/release 二选一、三端同步发版和自动模拟器流程均已退出当前主线。
 
-PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android ARM64 APK 构建、单元测试、签名及包完整性校验 → 发布。
+## 当前入口
 
-- 正式入口为独立 `android.yml`，合并 main 后全自动发布 APK；不会触发 Windows/macOS。迁移后 Android versionCode 使用 `100000 + github.run_number`，大于此前已发布 APK，同一次运行重跑保持不变。旧三端工作流已移除。
-- PR 快检不接收签名 secrets、不运行 APK 或模拟器。文档变更在 main 仅快检。
-- main 发布串行；未准备版本的过期提交正常跳过，正在运行的固定源码版本完成后再处理最新 main。
-- 失败时不发版。优先 Re-run failed jobs；同 run 全量重跑复用原版本 pin，artifact 按 attempt 隔离、保留14天。
-- 下载使用成功 job 的 artifact ID；每个包验证源码 SHA、版本、versionCode、run ID 和 SHA256，拒绝缺失或不匹配产物。
-- 已公开版本重跑只验证 tag 和公开校验文件，不覆盖资产；修复源码走新 PR 和新版本。
-- 日常发布不构建 x86_64 测试 APK、不运行模拟器、完整交互或三次60秒冷启动观察。这些检查保留在可选诊断入口，不阻塞发布。
-- 手动诊断仍通过 Android emulator startup diagnosis 运行。没有自动 candidate 转发或独立 main push 模拟器。
+| 工作流 | 触发与用途 |
+|---|---|
+| Pull request quick checks / quality.yml | PR 源码、Node/Python 回归、版本、Rust 格式和工作流语法；不使用正式签名密钥，不编译 APK |
+| Sync verified frontend and build / frontend-sync.yml | main push、定时或手动；等待前端 Release，校验/提交版本锁，显式派发 android.yml |
+| Android APK release / android.yml | main 的 workflow_dispatch；自动 patch bump、固定源码、ARM64 编译与签名发布 |
+| Android emulator startup diagnosis | 可选手动启动诊断；不属于正式 APK 发布门禁 |
+| Android layout and bundled frontend diagnosis | 可选布局/内置前端诊断，按其工作流允许的来源执行；不宣称等同真机 |
+| Initialize Android release keystore | 仅首次准备固定签名身份；已有密钥禁止重新生成 |
 
-以下为历史签名配置参考；其中旧 candidate / 手动 release 的日常触发说明已被上述流程替代。
+日常只需本地编辑/推送；前端仓库先发布成功，后端和 APK 再各自构建。PR 是检查和审查载体，真正连接仓库的是前端 Release、frontend.lock.json 和 Actions。Codespaces 不参与这条主线，当前暂停使用。
 
-# GitHub Actions 与正式发布
+## 正式 APK 门禁
 
-构建工作流位于 `.github/workflows/build.yml`，Android emulator 启动诊断位于 `.github/workflows/android-emulator-diagnose.yml`，一次性 Android keystore 初始化位于 `.github/workflows/bootstrap-android-keystore.yml`。日常开发只在 `main` 上进行。main push 运行 Node tests、版本一致性、JDK 25 临时 PKCS#12 smoke test、Rust 格式检查，以及一个仅核对并删除四个指定且已合入旧 stage 分支的清理 job；修改 app 行为文件时还会启动单独的 x86_64 emulator 诊断，但不会发布安装包。手动 build workflow 接受 `candidate` 或 `release` 模式，不接受平台选择。
+1. 第一次运行检查当前前端发布与锁文件一致；同 run 重试保留原已准备版本。
+2. 验证已有 PKCS#12、别名和密码，才允许版本准备。
+3. 自动递增 patch，同步 package、Cargo、Tauri 和锁文件，通过 non-force 更新 main；后续质量检查和构建固定到这份源码。
+4. 下载并校验锁定前端；构建 Android ARM64 签名 APK，运行 connection-controls 原生单元测试。
+5. 检查证书指纹、package ID、minSdk、ABI、版本/versionCode、源码身份与产物 SHA256。
+6. 所有门禁成功后，按成功 artifact ID 收集包，创建 tag、APK 和 SHA256SUMS 的公开 Release。
 
-在仓库 **Actions → Build desktop and Android packages → Run workflow** 中选择 `main` 和运行模式。`release` 会先验证两项 Android signing secrets，然后将 stable semver patch 递增并通过 GitHub API non-force 地提交到 `main`。这个 run 的 quality 与 Windows、macOS、Android jobs 都 checkout 同一新提交 SHA。Windows x64 生成含离线 WebView2 Runtime 的 NSIS installer；macOS ARM64 生成 ad-hoc DMG 并运行 Rust library tests；Android 生成签名 ARM64 release APK。API 29 和 36 模拟器启动检查通过后，三端构建都成功才创建不可移动的版本 tag、上传三个包和 `SHA256SUMS` 并公开 GitHub Release。未全部成功时不会公开 Release。手动 run 不会创建 PAT，也不运行自动更新。
+不构建当前版本 Windows/macOS，不默认启动模拟器。网页浏览器检查、模拟器结果和真实手机验收各自独立。产物未经验证时只可保留为明确标记的 UNVERIFIED 内部诊断材料，不能当作正式包安装分发。
 
-`candidate` 模式用于先在 Android 真机验证当前 `main`。它不修改应用语义版本、不创建 tag/Release，构建受两项现有 secrets 签名的 ARM64 APK，versionCode 为 `1000 + github.run_number`，Actions artifact 保留三天。APK 构建与 emulator 检查相互独立；后置包验证失败时仍保留明确标记为 UNVERIFIED 的内部 artifact。candidate 不发布到 Release。触及 app 或构建 workflow 的 main push 会自动触发一次固定的 candidate workflow_dispatch；这是开发候选便捷触发，不会启动正式发布。也可手动运行：
+## 版本与重试
 
-1. 在 **Actions → Build desktop and Android packages → Run workflow** 选择 `main` 和 `candidate`，等待 `candidate-quality` 与 `android-candidate` 完成；emulator 检查独立运行并单独查看 API 29/36 状态。emulator 基础设施失败不会阻止 APK artifact，但不能记作模拟器或真机通过。
-2. 打开这次 workflow run，查看 Android package verification 结果和 artifact 内 README，再下载名称以 `Open-WebUI-Client-candidate-` 开头的 artifact。若 README 或 run 标记 UNVERIFIED、或包验证失败，不要安装或分发。只有验证成功的固定签名 APK 才可在相同签名身份的 Redmi 上覆盖安装（例如 `adb install -r <候选APK路径>`），无需卸载旧 app。
-3. 在 Redmi 上记录 Android 版本、候选源 SHA 和 APK versionCode，检查启动、前台稳定性与连接页。若系统报告签名或版本错误，停止安装并先核对 artifact，不要卸载已有 app 来绕过错误。
-
-该候选 run 中的 emulator smoke APK 是另一份 x86_64、临时密钥签名的测试 APK，只用于 API 29/36 hosted emulator；它不是上述固定密钥 ARM64 candidate，不能覆盖安装 release。APK 构建结果、emulator 结果和真机验收是三个独立事实；模拟器检查结果只说明对应 emulator/source 的行为，不等于 Redmi 等实体设备通过。
+- 版本一致性命令：`npm run version:check`。CI 在实际发布时递增 patch。
+- Android release versionCode 为 `100000 + android.yml 的 github.run_number`；debug 源码占位值为2。旧历史版本使用过不同基数，不再用旧公式解释新 APK。
+- 相同 run 的重试复用原版本、版本提交和 versionCode。新 run 递增；不要通过新建 run 反复替代原失败 job 重试。
+- 公开 Release 的 tag 和资产不可被重跑替换；源码变更应走新版本。
+- main 发布串行，运行中版本不取消；未准备版本且已过期的来源可能跳过。定时同步去重，不反复重试同一失败 run。
+- 当前同步器未普遍排除文档提交，不能再承诺“文档 main push 只快检、绝不发版”。
+- 通过验证的正式内部 artifact 及清单保留14天；临时 artifact 不是长期下载入口。下载见 [最新 Release](https://github.com/Mike666wq/open-webui-client/releases/latest)。
 
 ## 首次配置 Android 签名密钥
 
@@ -52,29 +59,13 @@ PR → 快检与审查 → 合并 main → 自动 patch 升版 → 仅 Android A
 
    别名始终为 `openwebui-client`，无需 `ANDROID_KEY_ALIAS` 或 `ANDROID_KEY_PASSWORD` secrets。workflow 不读取或输出 secret 值；手动发布前会校验 Base64 格式、密码、PKCS#12 文件及固定别名。Secrets 通过仓库 Settings UI 管理；不要将其写入代码、命令行历史、日志或对话。
 
-## 版本、发布重试与下载
 
-应用版本同步保存在 `package.json`、`package-lock.json`、Tauri 配置和 app Cargo 元数据中。发布 workflow 自动执行 patch bump 并将版本提交到 `main`；手工版本调整可运行 `npm run version:check` 验证。Android release `versionCode` 为 `1000 + github.run_number`，并限制在 Android 支持的上限内。相同 run 重试会复用原版本提交、tag 和 versionCode；新的手动 run 会再次递增 patch 与 run number。若构建失败，版本 bump commit 会留在 main，但不会发布 Release。修复问题后启动一个新的手动 run，它会使用下一个 patch 版本。
+## 构建环境
 
-正式包通过 GitHub 仓库的 **Releases** 页面下载，release 含 Windows、macOS 和 Android ARM64 安装文件及 SHA-256 校验值。Actions artifacts 是构建过程中的临时材料，不是正式发布页面。workflow 只在所有平台构建和模拟器检查成功后公开 Release；它不发布到应用商店、不启用自动更新，也不替代实体设备验收。
+Android 使用 Ubuntu 22.04、Node 22.22.0、Rust 1.94.0、Temurin JDK25、Android Platform36、Build Tools36.0.0、NDK28.2.13676358、aarch64-linux-android。依赖按 npm/Cargo 锁文件安装；minSdk29。实际升级应以 android.yml 和版本锁为准，不把文档当作自动升级配置。
 
-桌面签名状态保持不变：Windows NSIS 包包含离线 WebView2 Runtime；macOS DMG 仅 ad-hoc 签名，没有 Developer ID 签名或公证。首次打开 macOS 应用时只对该应用使用 Finder 的“按住 Control 键点按 → 打开”，不要全局关闭 Gatekeeper。Android 候选/release 构建的模拟器检查不验证 Redmi 等实体设备上的安装、连接或 SAF provider 保存清理行为；这些仍需按[验收清单](ACCEPTANCE.md)手动完成。Android 官方图标已接入构建源码，最终包图标校验等待当前 CI 运行确认。
+## 验收与历史
 
-## 固定构建环境
+[run 39722809500](https://github.com/Mike666wq/open-webui-client/actions/runs/39722809500) 成功发布 [v0.2.31](https://github.com/Mike666wq/open-webui-client/releases/tag/v0.2.31)，证明对应提交通过构建、原生测试、签名和包完整性门禁。它不证明 Redmi/HyperOS 启动、真实服务、多设备或所有 SAF provider 已验收。
 
-- Node.js `22.22.0`，通过 `npm ci` 按锁文件安装；Rust `1.94.0`，Cargo 使用仓库 `src-tauri/Cargo.lock`。
-- Windows：`windows-2025`，x64 NSIS installer。
-- macOS：`macos-15`，Apple Silicon ARM64 ad-hoc DMG。
-- Android：Ubuntu `22.04`、Temurin JDK `25`、Android Platform `36`、Build Tools `36.0.0`、NDK `28.2.13676358` 和 Rust target `aarch64-linux-android`。Tauri CLI 2.12.2 Android 模板的 compile/target SDK 值由 `scripts/prepare-android.mjs` 定向调整到 36；应用 minSdk 仍为 29。
-
-`prepare-lockfile` 仅确认 `package-lock.json` 和 `src-tauri/Cargo.lock` 存在，并将当前 checkout SHA 固定给后续 jobs；它不会更新锁文件、运行 formatter 或提交代码。Android manifest、明文网络配置和 Gradle release 签名配置在 CI 生成工程后由 `scripts/prepare-android.mjs` 幂等准备；源码中的 debug versionCode 保持 `2`。签名 release job 才在生成 Gradle 项目中覆盖 `defaultConfig.versionCode`，并且会验证 APK 签名证书与固定 keystore 的 SHA-256 指纹一致、package ID、minSdk、ARM64 ABI 与 versionCode。
-
-旧 `codex/stage-1`、`codex/stage-2-connection-settings`、`codex/stage-3-downloads` 和 `codex/stage-4-signing-delivery` 分支仅在 main push 的质量检查成功后清理。job 在删除前要求 main 仍是该 push 的 SHA，并逐项确认指定 branch head 是该 SHA 的 ancestor；缺失的固定分支视为已清理，改变或未合入的分支会导致 job 安全失败。它不会枚举或删除其他分支。
-
-
-## Android 构建后校验与测试源码
-
-- 图标校验使用 AAPT2 编译资源表定位各密度图标，兼容 release 的资源路径缩短；比较解码后的尺寸与 RGBA 像素，而不是 PNG 压缩字节。完全透明像素的不可见 RGB 会被归零。签名、包名、SDK 与 ARM64 校验仍保留。
-- candidate / release 调用可复用模拟器工作流时，显式传入的不可变 `source_sha` 与 `source_label` 优先于调用方继承的事件名；不能因为事件名是 `workflow_dispatch` 而回退到 v0.2.2。独立诊断仍可主动选择旧基线。
-- 指向 main 的 pull request 运行质量检查；同仓库分支的 pull request 还会调用固定源码 SHA 的模拟器诊断。独立诊断也可在修复分支手动选择 `current`，使用 runner 临时签名构建 x86_64 APK、检查编译图标并运行 API 29/36 模拟器；不读取正式签名密钥，也不发布 Release。
-- 安装依赖、测试与构建均在 GitHub Actions runner 上执行，本地只编辑文件。模拟器通过仍不代表 ARM64 真机验收完成。
+Windows/macOS 既有历史包继续保留；当前流程不重建它们，也没有正式桌面签名、公证或商店分发。历史三端流程可在 [旧文档快照](https://github.com/Mike666wq/open-webui-client/blob/2edd1164404a4049056c6d404176ad6f28557ff4/docs/GITHUB_ACTIONS.md) 查阅，不能作为当前运行步骤。人工验收见 [ACCEPTANCE.md](ACCEPTANCE.md)。

@@ -1,37 +1,26 @@
-# 验收清单
+# 当前验收清单
 
-## GitHub Actions 构建
+核对日期：2026-10-22。共同进度见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。勾选仅代表对应的证据，不把自动化通过等同于人工验收。
 
-- [ ] 官方 Open WebUI 图标已统一接入连接页、Tauri Windows/macOS 图标和 Android launcher/adaptive/splash 资源；最终包内图标内容校验待当前源码的 Windows/macOS/Android CI 结果确认。
-- [ ] Redmi K70 Pro / HyperOS 3 的启动后约 10 秒内退出问题仍未定位。baseline emulator run [#8](https://github.com/Mike666wq/open-webui-client/actions/runs/39013519676) 成功构建并验证 v0.2.2 x86_64 测试 APK；API 29 首次冷启动闲置期间出现 native SIGABRT，现有 tombstone 只有未符号化的 `base.apk + 0x4f1d69`，不足以定位调用方；API 36 失败证据仍在核对。该 hosted emulator 结果不是 Redmi 实机复现。current-source run [#9](https://github.com/Mike666wq/open-webui-client/actions/runs/39013903737) 正在构建 `f0663e93e87a66a9689a3f53a8eca8a14e269eee`；main quality run [#64](https://github.com/Mike666wq/open-webui-client/actions/runs/39013904372) 仅因 Rust formatting 失败，格式修正待后续 push。根因和修复均未确认。
-- [ ] 新版 `candidate` 模式的 ARM64 APK 构建与 API 29/36 emulator 检查独立；包验证失败仍会保留标记为 UNVERIFIED 的内部 Actions artifact，不能安装或分发。成功验证的固定 keystore APK 使用 `1000 + github.run_number` versionCode，保留三天，不递增 app 版本、不创建 tag/Release。emulator 结果与 Redmi 真机验收分开记录。
-- [ ] 后续需记录 candidate 下载、覆盖安装和 Redmi 启动结果；若候选仍在 10 秒内退出，保留设备型号、Android 版本、候选 source SHA、versionCode 和过滤后的诊断日志，再决定修复方向。
+## 已验证的自动交付
 
-- [x] 历史阶段四基线 push run [#45](https://github.com/Mike666wq/open-webui-client/actions/runs/38989565014)，source/output SHA `9effd627031d985395e650bf17933a38e8e56dcd`：Node tests 20/20、版本一致性、Rust 格式、JDK 25 临时 PKCS#12 生成 smoke test 通过；Windows NSIS、macOS ARM64 ad-hoc DMG/Rust tests 12/12 和 Android debug 检查通过。
-- [x] main 修复 push run [#51](https://github.com/Mike666wq/open-webui-client/actions/runs/38995797837)，SHA `260acae8fe9100dfb752506118513f8f6d2712af`：Node tests 33/33、0 skipped，版本一致性、JDK 25 临时 keystore smoke test、Rust 格式和受限旧分支清理均通过。
-- [x] 首次 main 手动发版 run [#52](https://github.com/Mike666wq/open-webui-client/actions/runs/38995899635)：两项 signing secrets 与 PKCS#12/alias 检查通过；自动 patch bump 到 `0.2.2`，并固定三端源码 SHA `3edd2b1191f5f7bbd56cf2d35dd401bb61489f10`，Android versionCode 为 `1052`。
-- [x] Run #52 的 release quality 通过；macOS ARM64 ad-hoc DMG 与 Rust tests 12/12、Windows x64 NSIS 和 Android signed ARM64 APK 均成功。APK 签名证书、package ID `local.openwebui.client`、minSdk 29、ARM64 ABI 和 versionCode 检查通过；三个构建均来自同一 pinned SHA。
-- [x] Run #52 创建并公开 [Release v0.2.2](https://github.com/Mike666wq/open-webui-client/releases/tag/v0.2.2)，含三端包及 `SHA256SUMS`；匿名 HEAD 请求对四个资产均返回 HTTP 200 和预期长度。校验文件包含且仅包含三个安装包，完整流式 SHA-256 与校验文件及 GitHub REST digest 匹配；文件未下载到本地。
-- [x] 下载资产长度：Windows `Open-WebUI-Client-0.2.2-windows-x64-setup.exe` 219,464,462 bytes；macOS `Open-WebUI-Client-0.2.2-macos-arm64.dmg` 4,015,417 bytes；Android `Open-WebUI-Client-0.2.2-android-arm64-vc1052.apk` 13,986,692 bytes；`SHA256SUMS` 333 bytes。
-- [x] main push quality run [#49](https://github.com/Mike666wq/open-webui-client/actions/runs/38994807152) 与修复后的 [#51](https://github.com/Mike666wq/open-webui-client/actions/runs/38995797837) 均成功；受限清理只针对固定的四个已合入旧 stage 分支，且在当前 main 上完成。
-- [x] 在 `main` 手动运行 **Build desktop and Android packages** 时自动 patch bump 并 non-force 提交 main；Run #52 的质量检查及三端构建均使用同一个 bump commit SHA。
-- [x] Android signed ARM64 APK 通过签名验证，package ID 为 `local.openwebui.client`、minSdk 为 29、包含 ARM64 native library、versionCode 为 `1000 + github.run_number`（Run #52 为 `1052`）。
-- [x] Windows x64 NSIS、macOS Apple Silicon ARM64 ad-hoc DMG 和 Android ARM64 signed APK 全部成功后才创建 tag、生成 `SHA256SUMS` 并公开 GitHub Release；Run #52 完成该门禁。
-- [x] 同一 workflow run 重试复用同一 patch commit/tag/versionCode；新 run 自动递增 patch 和 versionCode；源码/debug Android versionCode 保持 `2`。Run #52 使用 `0.2.2`、tag `v0.2.2` 与 versionCode `1052`。
-- [x] 两项 signing secrets 为 `ANDROID_KEYSTORE_PASSWORD` 与 `ANDROID_KEYSTORE_BASE64`；Run #52 在版本 bump 前成功验证两项配置及 PKCS#12 alias。固定 alias 为 `openwebui-client`，key password 复用 store password。
-- [ ] Keystore bootstrap 仅允许 main 手动运行；存在 `ANDROID_KEYSTORE_BASE64` 或同一 run rerun 时拒绝生成。生成的加密 PKCS#12 artifact 一天后过期，且不作为私密存储。
+- [x] [Android run 39722809500](https://github.com/Mike666wq/open-webui-client/actions/runs/39722809500) 的源码质量、版本一致性、固定签名验证、ARM64 编译、原生单元测试、证书/包元数据/产物完整性及公开发布成功，对应 [v0.2.31](https://github.com/Mike666wq/open-webui-client/releases/tag/v0.2.31)。
+- [x] 已存在固定签名身份，正式发布校验证书与包内身份；当前不是“等待首次初始化密钥”的阶段。不得因重新部署环境而重生成密钥。
+- [x] 后端和 APK 通过各自 frontend.lock.json 固定前端来源和摘要；历史成功基线已跑通，后续更新必须再核对两份锁和对应 run。
+- [x] 当前正式流程只发 Android ARM64 APK，不默认运行模拟器，不使用旧 candidate 模式；桌面历史包与新 Android 发布分开记录。
 
-## 维护者签名密钥初始化
+## 尚未完成的验收
 
-- [ ] 使用密码管理器生成至少 32 个随机字符的 `ANDROID_KEYSTORE_PASSWORD`，只在仓库 Actions secrets 中设置；密码不进入聊天、issue、日志或仓库。
-- [ ] 从 `main` 手动运行 **Initialize Android release keystore**，确认摘要中有 SHA-256 证书指纹和一天保留提示。
-- [ ] 同一初始化 run 的 rerun 会拒绝生成第二把 key；artifact 状态不明时检查并处理原 run，再创建新 run。
-- [ ] 立即下载密码保护 PKCS#12 artifact，在仓库外安全位置私下备份并验证文件；然后删除 artifact 与初始化 workflow run。不要把 artifact URL 当成私有访问控制。
-- [ ] 在本机 PowerShell 将备份文件编码到剪贴板，再通过仓库设置 UI 添加剩余的 `ANDROID_KEYSTORE_BASE64` secret。不要将 Base64 写入终端历史、文件、issue 或聊天；设置后清空剪贴板。
-- [ ] 确认仅设置两个 secrets：`ANDROID_KEYSTORE_BASE64` 和 `ANDROID_KEYSTORE_PASSWORD`。固定 alias 是 `openwebui-client`，Android key password 与 store password 相同，不创建冗余 alias/password secrets。
-- [x] 在所有代码检查通过后，从 `main` 手动运行 **Build desktop and Android packages**；Run #52 验证公开 Release 中三端包、`SHA256SUMS` 与签名 APK 证书指纹。
+- [ ] 全部目标手机上的安装覆盖、前后台、原生面板、返回顺序、键盘与旋转。
+- [ ] Redmi K70 Pro / HyperOS 3 启动后退出问题的根因和修复验证。没有足够真机证据前继续保留为未解决，不能以 CI 或模拟器通过结案。
+- [ ] 真实后端账号、模型调用、长会话、上传下载和多人/多设备回归。
+- [ ] SAF 真实 provider 的选择、取消、迟到回调、大文件和失败清理。
+- [ ] 生产部署/迁移/恢复演练；本轮无自动生产切换。
+- [ ] Codespaces Docker/Compose 与实际网页启动验收。环境仍有创建/软件源问题，当前暂停使用。
 
-## Windows 与 macOS 真机验收
+历史 v0.2.2 三端构建、旧 candidate、早期诊断和测试数量保存在 [审计前文档快照](https://github.com/Mike666wq/open-webui-client/blob/2edd1164404a4049056c6d404176ad6f28557ff4/docs/ACCEPTANCE.md)；其中“正在构建”等文字仅是当时记录，不是当前状态。
+
+## Windows 与 macOS 历史包的真机验收（非当前发版门禁）
 
 - [ ] Windows 10 与 Windows 11 x64 安装、首次启动、卸载；在未预装 WebView2 Runtime 的干净环境验证离线运行时安装。
 - [ ] macOS 12+ Apple Silicon 挂载、安装并启动 DMG；记录 ad-hoc 签名首次运行提示。
@@ -45,14 +34,14 @@
 - [ ] 对 HTTP 和 HTTPS 的 IPv4/IPv6 地址、域名、子域名、不同端口及根路径进行连接验证；输入规范化正确且成功地址可持久保存。
 - [ ] 无效地址、服务不可用或 30 秒内连接失败时回到设置页、保留候选输入，不覆盖上次成功地址；恢复服务后可重新连接。
 - [ ] 强制结束并重启应用后自动连接到最近一次成功地址。
-- [ ] 在远程服务页面按 Android 系统返回键回到 bundled 本地设置页；在本地设置页再次按系统返回键退出，不返回远程页面。
+- [ ] Android 返回顺序：收起键盘、关闭客户端弹层、返回当前服务内上一页；无历史时退到后台，不误切回旧服务。
 - [ ] HTTP 按明文传输显示并说明风险；HTTPS 使用系统默认证书验证，证书无效时不得忽略或绕过错误。
 
 ## 用户连接与导航
 
 - [ ] 首次打开显示本地连接页，预填 `http://192.168.31.60:3000`；将它替换为实际服务地址后，只有连接成功才保存为最近成功地址。
 - [ ] 停止服务或输入不可用地址，确认失败后回到本地设置页并保留候选输入，原有成功地址不被覆盖；恢复服务后可重新连接。
-- [ ] 连接后桌面使用 Windows/Linux `Ctrl+L` 或 macOS `⌘L` 返回设置页；Android 系统返回键从远程页面回到本地设置，再按一次结束应用。
+- [ ] 连接后桌面使用 Windows/Linux `Ctrl+L` 或 macOS `⌘L` 返回设置页；Android 点击原生顶部栏设置入口修改连接，系统返回按当前原生导航顺序处理。
 - [ ] 在服务内容中分别验证明确下载操作与普通预览链接：下载按应用保存桥执行；没有下载意图的图片/媒体预览和普通内部链接留在 WebView 中，不能因此弹出文件保存选择器。
 
 ## Android 系统文件保存验收
